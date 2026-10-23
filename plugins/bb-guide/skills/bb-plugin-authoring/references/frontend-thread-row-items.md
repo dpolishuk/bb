@@ -25,8 +25,9 @@ function DeployBadge({ thread, isLive }: ExperimentalThreadRowItemProps) {
 }
 ```
 
-Components receive `{ thread, isLive }` and mount with their row; return null
-to show nothing. `isLive` changes only at a scroll pause: on-screen rows turn
+Components receive `{ thread, isLive }` and mount once their row is live; an
+item that has drawn something mounts with its row from then on, so cached
+content draws in the row's first frame. Return null to show nothing. `isLive` changes only at a scroll pause: on-screen rows turn
 live and rows that left stop, together, about 200 ms after scrolling stops,
 while the page is visible. Hiding the page turns every row off at once. Gate reads, watches and polling on it
 and render cached data either way: rows that appear together read together in

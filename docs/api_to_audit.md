@@ -2586,9 +2586,12 @@ one row, sorted by `order` (unset last) then registration order, each in its
 own crash boundary keyed by thread, inside one container capped at 80 px that
 is hidden while empty. It renders nothing when no plugin registers an item.
 
-Visibility is the host's (`apps/app/src/lib/thread-row-visibility.ts`). Items
-mount with their row, so cached data draws in the row's first frame; the list's
-own windowing decides which rows exist. One viewport IntersectionObserver
+Visibility is the host's (`apps/app/src/lib/thread-row-visibility.ts`). An item
+mounts once its row is live; an item that has drawn something mounts with its
+row from then on, so cached data draws in the row's first frame, and rows
+scrolled past mount nothing. The container shows while any item draws
+something (a MutationObserver keeps a `data-has-items` attribute current). One
+viewport IntersectionObserver
 watches each row (the items container's parent element), and `isLive` changes
 only at a scroll pause: 200 ms after the last row entered or left the screen,
 every on-screen row turns live and every off-screen row stops, in one batch, so

@@ -1781,8 +1781,10 @@ export interface ExperimentalThreadRowItemProps {
 
 /**
  * A small item on each thread row, beside the title and before the row's
- * status glyph: a badge, not a control. The host mounts the component with
- * its row, caps the row's items at 80 px together, hides
+ * status glyph: a badge, not a control. The host mounts the component once
+ * its row is live, and with the row from then on while it shows something,
+ * so cached content draws in the row's first frame. It caps the row's items
+ * at 80 px together, hides
  * them while the row is renamed or customized, and keeps them visible on
  * hover. Render null to show nothing for a thread. Keep it to an icon-sized
  * glyph with a tooltip; clicks on it open the thread like the rest of the

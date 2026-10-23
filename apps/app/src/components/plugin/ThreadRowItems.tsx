@@ -1,4 +1,4 @@
-import { memo, useRef } from "react";
+import { memo, useLayoutEffect, useRef } from "react";
 import type {
   ExperimentalThreadRowItemsProps,
   PluginSidebarThread,
@@ -27,6 +27,32 @@ function sortThreadRowItems(
     .map(({ slot }) => slot);
 }
 
+const itemsWithContent = new Set<string>();
+
+export function resetThreadRowItemsForTest(): void {
+  itemsWithContent.clear();
+}
+
+function itemKey(slot: PluginThreadRowItemSlot, threadId: string): string {
+  return `${slot.pluginId}/${slot.id}/${slot.generation}/${threadId}`;
+}
+
+function recordItemContent(
+  container: HTMLElement,
+  rendered: { slots: readonly PluginThreadRowItemSlot[]; threadId: string },
+): void {
+  const roots = container.querySelectorAll(":scope > [data-bb-plugin-root]");
+  let hasItems = false;
+  rendered.slots.forEach((slot, index) => {
+    const key = itemKey(slot, rendered.threadId);
+    if (roots[index]?.hasChildNodes()) {
+      itemsWithContent.add(key);
+      hasItems = true;
+    } else itemsWithContent.delete(key);
+  });
+  container.toggleAttribute("data-has-items", hasItems);
+}
+
 function MountedThreadRowItems({
   thread,
   slots,
@@ -36,13 +62,31 @@ function MountedThreadRowItems({
 }) {
   const anchor = useRef<HTMLSpanElement>(null);
   const isLive = useThreadRowLive(anchor);
+  const mounted = slots.filter(
+    (slot) => isLive || itemsWithContent.has(itemKey(slot, thread.id)),
+  );
+  const rendered = useRef({ slots: mounted, threadId: thread.id });
+  useLayoutEffect(() => {
+    rendered.current = { slots: mounted, threadId: thread.id };
+    if (anchor.current !== null)
+      recordItemContent(anchor.current, rendered.current);
+  });
+  useLayoutEffect(() => {
+    const container = anchor.current;
+    if (container === null) return;
+    const observer = new MutationObserver(() =>
+      recordItemContent(container, rendered.current),
+    );
+    observer.observe(container, { childList: true, subtree: true });
+    return () => observer.disconnect();
+  }, []);
   return (
     <span
       ref={anchor}
       data-thread-row-items=""
-      className="pointer-events-auto relative z-[31] ml-auto hidden max-w-20 shrink-0 items-center gap-1 overflow-hidden has-[[data-bb-plugin-root]:not(:empty)]:flex"
+      className="pointer-events-auto relative z-[31] ml-auto hidden max-w-20 shrink-0 items-center gap-1 overflow-hidden data-[has-items]:flex"
     >
-      {slots.map((slot) => {
+      {mounted.map((slot) => {
         const Component = slot.component;
         return (
           <PluginSlotMount

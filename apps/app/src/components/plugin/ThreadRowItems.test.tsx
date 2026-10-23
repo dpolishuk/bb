@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { act, cleanup, render, screen } from "@testing-library/react";
+import { useEffect, useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ExperimentalThreadRowItemProps } from "@get-bb/plugin-sdk";
 import { makeThreadListEntry } from "@bb/test-helpers/domain-fixtures";
@@ -11,7 +12,7 @@ import {
 import { toPluginSidebarThread } from "@/lib/plugin-sidebar-threads";
 import { THREAD_ROW_SETTLE_MS } from "@/lib/thread-row-visibility";
 import { makePluginRegistrationSet } from "@/test/fixtures/plugins";
-import { ThreadRowItems } from "./ThreadRowItems";
+import { ThreadRowItems, resetThreadRowItemsForTest } from "./ThreadRowItems";
 
 class FakeIntersectionObserver {
   static instances: FakeIntersectionObserver[] = [];
@@ -87,6 +88,7 @@ afterEach(() => {
   cleanup();
   removePluginSlotRegistrations("demo");
   resetAllCrashedPluginSlotsForTest();
+  resetThreadRowItemsForTest();
   vi.unstubAllGlobals();
   vi.useRealTimers();
   Reflect.deleteProperty(document, "visibilityState");
@@ -94,7 +96,12 @@ afterEach(() => {
 });
 
 describe("thread row items", () => {
-  it("draws items in the row's first frame and turns them live only after a scroll pause on screen", () => {
+  function goLive(row: HTMLElement) {
+    intersect(row, true);
+    act(() => vi.advanceTimersByTime(THREAD_ROW_SETTLE_MS));
+  }
+
+  it("mounts items once their row is live after a scroll pause, and keeps items that show something", () => {
     setPluginSlotRegistrations(
       "demo",
       makePluginRegistrationSet({
@@ -102,11 +109,11 @@ describe("thread row items", () => {
       }),
     );
     const { row } = renderRow();
-    expect(screen.getByTestId("badge").dataset.live).toBeUndefined();
+    expect(screen.queryByTestId("badge")).toBeNull();
 
     intersect(row, true);
     act(() => vi.advanceTimersByTime(THREAD_ROW_SETTLE_MS - 1));
-    expect(screen.getByTestId("badge").dataset.live).toBeUndefined();
+    expect(screen.queryByTestId("badge")).toBeNull();
     act(() => vi.advanceTimersByTime(1));
     expect(screen.getByTestId("badge").dataset.live).toBe("");
 
@@ -134,7 +141,47 @@ describe("thread row items", () => {
     expect(screen.getByTestId("badge").dataset.live).toBeUndefined();
   });
 
-  it("keeps rows that scroll past from going live and re-renders nothing while scrolling", () => {
+  it("draws an item that showed something in the row's first frame when the row mounts again", () => {
+    setPluginSlotRegistrations(
+      "demo",
+      makePluginRegistrationSet({
+        threadRowItems: [{ id: "badge", component: item("badge") }],
+      }),
+    );
+    const first = renderRow();
+    goLive(first.row);
+    first.unmount();
+    renderRow();
+    expect(screen.getByTestId("badge").dataset.live).toBeUndefined();
+  });
+
+  it("shows the row's items only while one of them draws something, including updates the item makes itself", async () => {
+    function Late() {
+      const [ready, setReady] = useState(false);
+      useEffect(() => {
+        const timer = setTimeout(() => setReady(true), 50);
+        return () => clearTimeout(timer);
+      }, []);
+      return ready ? <span data-testid="late">late</span> : null;
+    }
+    setPluginSlotRegistrations(
+      "demo",
+      makePluginRegistrationSet({
+        threadRowItems: [{ id: "late", component: Late }],
+      }),
+    );
+    const { row } = renderRow();
+    goLive(row);
+    const container = row.querySelector("[data-thread-row-items]")!;
+    expect(container.hasAttribute("data-has-items")).toBe(false);
+    await act(async () => {
+      vi.advanceTimersByTime(50);
+    });
+    expect(screen.getByTestId("late")).toBeTruthy();
+    expect(container.hasAttribute("data-has-items")).toBe(true);
+  });
+
+  it("mounts nothing for rows that scroll past without a pause", () => {
     setPluginSlotRegistrations(
       "demo",
       makePluginRegistrationSet({
@@ -142,13 +189,11 @@ describe("thread row items", () => {
       }),
     );
     const { row } = renderRow();
-    const rendersAtMount = seen.length;
     intersect(row, true);
     act(() => vi.advanceTimersByTime(THREAD_ROW_SETTLE_MS / 2));
     intersect(row, false);
     act(() => vi.advanceTimersByTime(THREAD_ROW_SETTLE_MS * 5));
-    expect(seen.some((render) => render.isLive)).toBe(false);
-    expect(seen).toHaveLength(rendersAtMount);
+    expect(seen).toEqual([]);
   });
 
   it("orders items, renders nothing without contributions, and drops only a crashing item", () => {
@@ -169,6 +214,7 @@ describe("thread row items", () => {
       }),
     );
     const { row } = renderRow();
+    goLive(row);
     expect(
       [...row.querySelectorAll("[data-testid]")].map((element) =>
         element.getAttribute("data-testid"),
