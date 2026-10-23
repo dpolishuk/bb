@@ -1,3 +1,4 @@
+import { GIT_PLUGIN_ID } from "bb-git-contract";
 import { eq, inArray, sql } from "drizzle-orm";
 import {
   aiServiceSelectionSchema,
@@ -99,6 +100,45 @@ export function setAppSettings(db: DbConnection, settings: AppSettings): void {
   });
 }
 
+const RETIRED_KEYBOARD_COMMAND_IDS: ReadonlyMap<string, string> = new Map([
+  ["diff.toggle", `plugin:${GIT_PLUGIN_ID}/toggle-diff`],
+]);
+
+function overrideSlot(entry: unknown): string | null {
+  if (
+    typeof entry !== "object" ||
+    entry === null ||
+    !("command" in entry) ||
+    typeof entry.command !== "string"
+  ) {
+    return null;
+  }
+  const platform =
+    "platform" in entry && typeof entry.platform === "string"
+      ? entry.platform
+      : "all";
+  return `${entry.command}:${platform}`;
+}
+
+function migrateRetiredKeyboardCommands(stored: unknown): unknown {
+  if (!Array.isArray(stored)) return stored;
+  const explicitSlots = new Set(stored.map(overrideSlot));
+  return stored.flatMap((entry: unknown) => {
+    if (
+      typeof entry !== "object" ||
+      entry === null ||
+      !("command" in entry) ||
+      typeof entry.command !== "string"
+    ) {
+      return [entry];
+    }
+    const replacement = RETIRED_KEYBOARD_COMMAND_IDS.get(entry.command);
+    if (replacement === undefined) return [entry];
+    const migrated = { ...entry, command: replacement };
+    return explicitSlots.has(overrideSlot(migrated)) ? [] : [migrated];
+  });
+}
+
 export function getAppKeybindingOverrides(
   db: DbConnection,
 ): AppKeybindingOverrides {
@@ -111,7 +151,9 @@ export function getAppKeybindingOverrides(
   if (row === undefined) {
     return [];
   }
-  return appKeybindingOverridesSchema.parse(parseStoredValue(row.value));
+  return appKeybindingOverridesSchema.parse(
+    migrateRetiredKeyboardCommands(parseStoredValue(row.value)),
+  );
 }
 
 export function setAppKeybindingOverrides(

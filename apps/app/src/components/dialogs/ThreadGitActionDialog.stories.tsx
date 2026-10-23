@@ -1,6 +1,5 @@
-
 import { ThreadGitActionDialogContent } from "./ThreadGitActionDialog";
-import type { ThreadGitStatusDisplay } from "@/components/workspace/workspace-status";
+import type { ThreadGitStatusDisplay } from "@bb/shared-ui/git-status-display";
 import type { WorkspaceChangedFilesSection } from "@bb/shared-ui/workspace-change-summary";
 import { BRANCH_NAMES } from "../../../.ladle/story-fixtures";
 import { StoryCard, StoryRow } from "../../../.ladle/story-card";

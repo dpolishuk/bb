@@ -1885,6 +1885,9 @@ importers:
       '@bb/thread-view':
         specifier: workspace:*
         version: link:../thread-view
+      bb-git-contract:
+        specifier: workspace:*
+        version: link:../git-contract
       zod:
         specifier: 4.6.5
         version: 4.6.5
@@ -2016,6 +2019,9 @@ importers:
       '@bb/text-utils':
         specifier: workspace:*
         version: link:../text-utils
+      bb-git-contract:
+        specifier: workspace:*
+        version: link:../git-contract
       better-sqlite3:
         specifier: 12.10.0
         version: 12.10.0
@@ -3015,6 +3021,9 @@ importers:
       '@bb/thread-view':
         specifier: workspace:*
         version: link:../thread-view
+      '@get-bb/plugin-sdk':
+        specifier: workspace:*
+        version: link:../plugin-sdk
       '@hugeicons/core-free-icons':
         specifier: ^4.3.4
         version: 4.3.4
@@ -3036,6 +3045,9 @@ importers:
       tailwind-merge:
         specifier: ^3.4.0
         version: 3.4.0
+      usehooks-ts:
+        specifier: ^3.1.1
+        version: 3.1.1(react@19.2.4)
     devDependencies:
       '@bb/test-helpers':
         specifier: workspace:*
@@ -3169,6 +3181,9 @@ importers:
       recharts:
         specifier: ^2.15.4
         version: 2.15.4(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
+      sonner:
+        specifier: ^1.7.4
+        version: 1.7.4(patch_hash=ywi4zh4oqnjpviiknloue4elvi)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
       tsrs:
         specifier: 0.18.0-ts7.1.0-dev.20260929
         version: 0.18.0-ts7.1.0-dev.20260929
@@ -4461,15 +4476,33 @@ importers:
       '@bb/domain':
         specifier: workspace:*
         version: link:../../packages/domain
+      '@bb/host-daemon-contract':
+        specifier: workspace:*
+        version: link:../../packages/host-daemon-contract
       '@bb/query-tags':
         specifier: workspace:*
         version: link:../../packages/query-tags
+      '@bb/shared-ui':
+        specifier: workspace:*
+        version: link:../../packages/shared-ui
+      '@tanstack/react-virtual':
+        specifier: 3.14.20
+        version: 3.14.20(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
       bb-environment-provider-host:
         specifier: workspace:*
         version: link:../../packages/environment-provider-host
       bb-git-contract:
         specifier: workspace:*
         version: link:../../packages/git-contract
+      mime-types:
+        specifier: ^3.0.2
+        version: 3.0.2
+      picomatch:
+        specifier: ^4.0.5
+        version: 4.0.5
+      usehooks-ts:
+        specifier: ^3.1.1
+        version: 3.1.1(react@19.2.4)
       zod:
         specifier: 4.6.5
         version: 4.6.5
@@ -4483,9 +4516,36 @@ importers:
       '@get-bb/plugin-sdk':
         specifier: workspace:*
         version: link:../../packages/plugin-sdk
+      '@testing-library/react':
+        specifier: ^16.3.2
+        version: 16.3.2(@testing-library/dom@10.4.1)(@types/react-dom@19.2.3(@types/react@19.2.13))(@types/react@19.2.13)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
+      '@types/mime-types':
+        specifier: ^3.0.1
+        version: 3.0.1
       '@types/node':
         specifier: ^22.0.0
         version: 22.19.10
+      '@types/picomatch':
+        specifier: ^4.0.3
+        version: 4.0.3
+      '@types/react':
+        specifier: ^19.0.0
+        version: 19.2.13
+      '@types/react-dom':
+        specifier: ^19.0.0
+        version: 19.2.3(@types/react@19.2.13)
+      jsdom:
+        specifier: ^29.0.1
+        version: 29.0.1(@noble/hashes@2.4.0)
+      react:
+        specifier: ^19.0.0
+        version: 19.2.4
+      react-dom:
+        specifier: ^19.0.0
+        version: 19.2.4(react@19.2.4)
+      sonner:
+        specifier: ^1.7.4
+        version: 1.7.4(patch_hash=ywi4zh4oqnjpviiknloue4elvi)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
       tsrs:
         specifier: 0.18.0-ts7.1.0-dev.20260929
         version: 0.18.0-ts7.1.0-dev.20260929

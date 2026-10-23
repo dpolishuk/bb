@@ -1,4 +1,4 @@
-import { DiffLoadingSkeleton } from "@/components/code/code-loading-skeletons";
+import { DiffLoadingSkeleton } from "@bb/shared-ui/diff-loading-skeleton";
 import { useCallback, useMemo, useRef, type CSSProperties } from "react";
 import type { FileDiffOptions, SelectedLineRange } from "@pierre/diffs";
 import { FileDiff as DiffView } from "@pierre/diffs/react";

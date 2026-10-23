@@ -78,7 +78,6 @@ import {
 } from "@/components/plugin/plugin-composer-host";
 import {
   ThreadPromptContextBanner,
-  type ContextBannerMergeBaseConfig,
   type ThreadPromptParentThreadSection,
   type ThreadPromptChildThreadsSection,
 } from "@/components/promptbox/banner/ThreadPromptContextBanner";
@@ -98,10 +97,6 @@ import {
   type SessionOptionChoices,
 } from "@/components/pickers/SessionOptionsMenu";
 import { useThreadSessionOptionChoices } from "./useThreadSessionOptionChoices";
-import type {
-  WorkspaceChangedFileSelection,
-  WorkspaceChangedFilesSection,
-} from "@bb/shared-ui/workspace-change-summary";
 import {
   LazyQueuedMessagesList,
   QueuedMessagesPendingCard,
@@ -161,7 +156,6 @@ import {
 import type { SendMessageMutationLike } from "./threadDetailMutationTypes";
 import { useTimeHasPassed } from "@/hooks/useTimeHasPassed";
 
-const ignorePromptBannerFileClick = () => {};
 const ignoreReportedSubmitError = () => {};
 
 export interface ThreadDetailSentMessageEdit {
@@ -186,7 +180,6 @@ const NO_INLINE_EDITOR_SELECTION: ExperimentalComposerSelection = {};
 
 interface ThreadDetailPromptAreaProps {
   canRestoreEnvironment: boolean;
-  canUseGitUi: boolean;
   contextWindowUsage?: ThreadTimelineResponse["contextWindowUsage"];
   environmentCheckout?: WorkspaceCheckoutDisplay;
   environmentCompactLabel?: string;
@@ -201,13 +194,8 @@ interface ThreadDetailPromptAreaProps {
   onOpenThreadInfo?: () => void;
   pendingInteractions: readonly PendingInteraction[];
   queuedMessageCount: number;
-  onChangedFileClick: (selection: WorkspaceChangedFileSelection) => void;
   projectId: string;
   resolveMentionLink: PromptMentionLinkResolver;
-  workspaceChangedFilesSection: WorkspaceChangedFilesSection | null;
-  showGitChanges: boolean;
-  workspaceStatusPending: boolean;
-  contextBannerMergeBase: ContextBannerMergeBaseConfig | null;
   pendingTodos: ThreadTimelinePendingTodos | null;
   activePromptMode: ThreadTimelineActivePromptMode | null;
   goal: ThreadTimelineGoal | null;
@@ -396,7 +384,6 @@ async function runWhileFollowUpShortcutSending(
 
 export function ThreadDetailPromptArea({
   canRestoreEnvironment,
-  canUseGitUi,
   contextWindowUsage,
   environmentCheckout,
   environmentCompactLabel,
@@ -411,13 +398,8 @@ export function ThreadDetailPromptArea({
   onOpenThreadInfo,
   pendingInteractions,
   queuedMessageCount,
-  onChangedFileClick,
   projectId,
   resolveMentionLink,
-  workspaceChangedFilesSection,
-  showGitChanges,
-  workspaceStatusPending,
-  contextBannerMergeBase,
   pendingTodos,
   activePromptMode,
   goal,
@@ -2124,17 +2106,6 @@ export function ThreadDetailPromptArea({
           core={{
             parentThread: parentThreadSection,
             childThreads: childThreadsSection,
-            git:
-              workspaceChangedFilesSection && showGitChanges
-                ? {
-                    changedFiles: workspaceChangedFilesSection,
-                    mergeBase: contextBannerMergeBase,
-                    onPromptBannerFileClick: canUseGitUi
-                      ? onChangedFileClick
-                      : ignorePromptBannerFileClick,
-                  }
-                : null,
-            gitPending: workspaceStatusPending && showGitChanges,
           }}
           showInlineSegments
           expandedSegment={expandedBannerSegment}
@@ -2179,16 +2150,13 @@ export function ThreadDetailPromptArea({
     [
       queueExpanded,
       setQueueExpanded,
-      canUseGitUi,
       contextBannerKey,
-      contextBannerMergeBase,
       environmentHostId,
       expandedBannerSegment,
       contextEnvironmentId,
       thread.projectId,
       handleDeleteQueuedMessage,
       beginEditQueuedMessage,
-      onChangedFileClick,
       handleReorderQueuedMessage,
       handleSendQueuedMessage,
       handleSetQueuedMessageGroupBoundary,
@@ -2226,9 +2194,6 @@ export function ThreadDetailPromptArea({
       submitMode.kind,
       thread.archivedAt,
       thread.id,
-      workspaceChangedFilesSection,
-      showGitChanges,
-      workspaceStatusPending,
     ],
   );
 
@@ -2264,8 +2229,6 @@ export function ThreadDetailPromptArea({
           core={{
             parentThread: null,
             childThreads: childThreadsSection,
-            git: null,
-            gitPending: false,
           }}
           archivedSection={null}
           environmentGoneSection={null}

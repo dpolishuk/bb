@@ -48,6 +48,10 @@ import {
 import type { PickerOption } from "@/components/pickers/OptionPicker";
 import { selectWorkspaceChangedFilesSection } from "@bb/shared-ui/workspace-change-summary";
 import { StoryCard, StoryRow } from "../../../.ladle/story-card";
+import {
+  GitSegmentFixtureProvider,
+  gitSegmentFixtureMergeBase,
+} from "@/test/fixtures/git-segment-plugin";
 import { ModelPickerStoryQueryProvider } from "../../../.ladle/model-picker-query-provider";
 import {
   makeEnvironment,
@@ -420,6 +424,12 @@ const dirtyContextBannerSection =
   selectWorkspaceChangedFilesSection(dirtyWorkspaceStatus);
 
 const contextBannerElement: ReactNode = dirtyContextBannerSection ? (
+  <GitSegmentFixtureProvider
+    value={{
+      section: dirtyContextBannerSection,
+      mergeBase: gitSegmentFixtureMergeBase(),
+    }}
+  >
   <ThreadPromptContextBanner
     input={{
       threadId: "thr_story",
@@ -427,16 +437,6 @@ const contextBannerElement: ReactNode = dirtyContextBannerSection ? (
       environment: null,
     }}
     core={{
-      git: {
-        changedFiles: dirtyContextBannerSection,
-        mergeBase: {
-          branch: "main",
-          options: ["main", "develop", "release/2026-05"],
-          onChange: noop,
-        },
-        onPromptBannerFileClick: noop,
-      },
-      gitPending: false,
       parentThread: null,
       childThreads: null,
     }}
@@ -446,6 +446,7 @@ const contextBannerElement: ReactNode = dirtyContextBannerSection ? (
     expandedSegment={null}
     onToggleSegment={noop}
   />
+  </GitSegmentFixtureProvider>
 ) : null;
 
 const archivedContextBannerElement: ReactNode = (
@@ -456,8 +457,6 @@ const archivedContextBannerElement: ReactNode = (
       environment: null,
     }}
     core={{
-      git: null,
-      gitPending: false,
       parentThread: null,
       childThreads: null,
     }}
@@ -477,8 +476,6 @@ const environmentGoneContextBannerElement: ReactNode = (
       environment: null,
     }}
     core={{
-      git: null,
-      gitPending: false,
       parentThread: null,
       childThreads: null,
     }}

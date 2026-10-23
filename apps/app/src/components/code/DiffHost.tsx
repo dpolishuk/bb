@@ -5,11 +5,8 @@ import type { ParsedGitDiffFile } from "@bb/shared-ui/git-diff/parsing";
 import { buildFileDiffPatchText } from "@bb/shared-ui/git-diff/patch-text";
 import { BbDiffSplit } from "./BbDiffSplit";
 import { useDiffRendererReplacement } from "./codeRendererProvider";
-import {
-  DEFAULT_CODE_OVERFLOW,
-  DEFAULT_DIFF_VIEW,
-  type DiffPresentation,
-} from "./code-rendering";
+import { DEFAULT_CODE_OVERFLOW, DEFAULT_DIFF_VIEW } from "./code-rendering";
+import type { DiffPresentation } from "@bb/shared-ui/git-diff/renderers";
 
 const DIFF_RENDERER_SLOT_KIND = "diffRenderer";
 

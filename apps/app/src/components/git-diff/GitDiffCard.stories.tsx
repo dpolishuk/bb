@@ -8,7 +8,7 @@ import { cn } from "@bb/shared-ui/lib/utils";
 import { Button } from "@bb/shared-ui/button";
 import { resolveAppThemeCss } from "@/lib/themes";
 import { GitDiffCard } from "@/components/git-diff/GitDiffCard";
-import type { DiffPresentation } from "@/components/code/code-rendering";
+import type { DiffPresentation } from "@bb/shared-ui/git-diff/renderers";
 import { parseGitDiffFiles } from "@bb/shared-ui/git-diff/parsing";
 
 export default {
