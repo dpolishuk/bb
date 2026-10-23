@@ -28,7 +28,7 @@ bb pull-request merge <environment-id> [--method merge|squash|rebase] [--json]
   with a message naming the machine.
 - `gh` must be installed and logged in on that machine.
 
-Other plugins read the same data through RPC. `experimental_pullRequests` is a keyed read:
+Other plugins read the same data through RPC. `pullRequests` is a keyed read:
 pass up to 200 environment ids and get one row per id. Available rows contain a `pullRequests` list, current-branch PR first; previously discovered branch PRs stay linked. `currentBranchUrl` is null when the current branch has no PR; core then displays no PR, otherwise the first entry. While a client watches
 a row, the plugin re-checks it every 30 seconds when checks are pending,
 auto-merge is on, the PR is queued or mergeability is unknown. It also rechecks after a turn that ran `gh`, or discovers a PR after a turn on a branch without one. Environment status and branch changes refresh; ref changes read the local upstream OID and fetch only when it changes. Quiet/settled PRs do not poll. Saved snapshots render immediately after restart; overdue reads refresh in the background. Environments sharing a PR share its fetch and timer, and viewers refresh only when the row changes.
@@ -37,10 +37,10 @@ auto-merge is on, the PR is queued or mergeability is unknown. It also rechecks 
 experimental_useRpcKeyedQuery({
   pluginId: "bb--github-pr-status",
   contract,
-  method: "experimental_pullRequests",
+  method: "pullRequests",
   keys: [environmentId],
 });
 ```
 
 `bb plugin rpc inspect bb--github-pr-status` prints the input and output schemas
-for `experimental_pullRequests`, `markReady`, `markDraft` and `merge`.
+for `pullRequests`, `markReady`, `markDraft` and `merge`.

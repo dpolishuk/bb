@@ -14,12 +14,6 @@ question.
 [provider-bridge-protocol.md](provider-bridge-protocol.md). An entry without
 a "Docs:" line has no owning doc, so it keeps the essential contract itself.
 
-## GitHub PR Status experimental keyed read
-
-The bundled `bb--github-pr-status` plugin exposes `experimental_pullRequests` through the existing typed RPC APIs. Each environment key returns `available` with a `pullRequests` list (current branch first) and nullable `currentBranchUrl`, `absent`, or `unavailable`. This replaces the plugin's one-PR `pullRequests` read. The composer, Info panel, retired sidebar shim and `bb thread show` use the same contract; `bb pull-request show` uses the same store. Only current-branch discovery exists. Linked PRs share persisted snapshots, loads and timers by URL.
-
-Docs: Plugin Guide HTTP/WebSocket/RPC card (`surfaces.ts`, `wire`). Before stabilization, settle link retention and removal, multi-host credential visibility, pagination and cross-version plugin contract compatibility. This changes a bundled plugin's RPC contract, not an exported Plugin SDK member; no new SDK API or daemon wire field is added.
-
 ## Composer popups
 
 `ComposerCustomization.experimental_popups` registers `{ id, label, component }`
@@ -2482,7 +2476,7 @@ Docs: `frontend-registration.md`.
    `hostId` ride on router state; confirm that stays the right transport, and
    audit the `hostId` selection semantics.
 7. **Pull requests on a row.** `experimental_useSidebarThreadPullRequest` was
-   removed; rows read the GitHub PR Status plugin's keyed `experimental_pullRequests`
+   removed; rows read the GitHub PR Status plugin's keyed `pullRequests`
    method. See "Retired `experimental_useSidebarThreadPullRequest` runtime
    member".
 8. **`experimental_useSidebarThreadSplit`.** Gives a custom row the built-in
@@ -3539,7 +3533,7 @@ back/forward navigation, crash/reload recovery, links and overflow.
 
 ## Plugin watched reads
 
-The GitHub PR Status plugin's keyed `experimental_pullRequests` read is the first producer: it shares a timer per PR and rechecks watched pending checks, auto-merge, queue and unknown mergeability about every 30 seconds. Upstream OID changes trigger a push refresh; turns recheck branches with no PR or known PRs when the turn ran gh. Status and branch changes still refresh. It invalidates the row's key tag only when the row changed, replacing core's `environment-pull-request` watched target.
+The GitHub PR Status plugin's keyed `pullRequests` read is the first producer: it shares a timer per PR and rechecks watched pending checks, auto-merge, queue and unknown mergeability about every 30 seconds. Upstream OID changes trigger a push refresh; turns recheck branches with no PR or known PRs when the turn ran gh. Status and branch changes still refresh. It invalidates the row's key tag only when the row changed, replacing core's `environment-pull-request` watched target.
 
 `bb.rpc.experimental_whileWatched(method, handler)` starts one producer for each distinct subscribed `{input}` or `{key}` read, and aborts it when its last client leaves or the plugin unloads. An app tab hidden for five seconds stops counting as a client until it is visible again. Register after the RPC method. Read identity uses canonical JSON and the encoded read is capped at 16 KiB. The server drops an oversized target from a subscribe message and keeps the rest, and the app doesn't send one. Every live app query hook holds a `plugin-read` subscription for its read, whether or not the method has a producer. Producers start and stop through the hub's watched-target registry, the path core uses for daemon git and thread-storage watching, thread timeline pushes and environment pull request checks.
 
@@ -3547,7 +3541,7 @@ Stabilize after exercising producer cancellation, reload, reconnect and byte lim
 
 ## Retired `experimental_useSidebarThreadPullRequest` runtime member
 
-`experimental_useSidebarThreadPullRequest(threadId)` and its `PluginSidebarPullRequest` and `PluginSidebarThreadPullRequestState` types are gone from `@get-bb/plugin-sdk/app`, the Plugin Guide and the authoring docs. Published bundles resolve `@get-bb/plugin-sdk/app` exports by name on `globalThis.__bbPluginRuntime.pluginSdkApp`, so the app installs `retiredPluginSdkAppMembers` (`apps/app/src/lib/plugin-sdk-app-impl.tsx`) next to the implementation. The member keeps its old shape, reads the GitHub PR Status plugin's `experimental_pullRequests` row for the thread's environment through the same `useEnvironmentPullRequest` hook core's banner and Info row use, and returns `{ isLoading: false, pullRequest: null }` when the plugin is disabled or the read fails. The name leaves only the typings. `bb-plugin-build` keeps it in the `@get-bb/plugin-sdk/app` runtime shim's export list (`RETIRED_PLUGIN_SDK_APP_EXPORTS` in `packages/plugin-build/src/build-plugin-app.ts`), so plugins that still import it build and run, because git-sourced marketplace plugins are built by bb at install and update and path and builtin plugins rebuild when the SDK version changes. An import of it is a build warning carrying the replacement call: `bb plugin build` and `bb plugin dev` print it, and the server writes it to the plugin's log and the server log when it builds the plugin. Callers are marketplace plugins written against the old SDK (t3sidebar, dockside, gtd-sidebar, thread-inbox, radar-sidebar, bb-sidebar, sidebar-plus, cursor-sidebar, switchboard, vantage, jb-flow, tinted-threads among them). Remove the runtime member and the shim entry only after those plugins have migrated.
+`experimental_useSidebarThreadPullRequest(threadId)` and its `PluginSidebarPullRequest` and `PluginSidebarThreadPullRequestState` types are gone from `@get-bb/plugin-sdk/app`, the Plugin Guide and the authoring docs. Published bundles resolve `@get-bb/plugin-sdk/app` exports by name on `globalThis.__bbPluginRuntime.pluginSdkApp`, so the app installs `retiredPluginSdkAppMembers` (`apps/app/src/lib/plugin-sdk-app-impl.tsx`) next to the implementation. The member keeps its old shape, reads the GitHub PR Status plugin's `pullRequests` row for the thread's environment through the same `useEnvironmentPullRequest` hook core's banner and Info row use, and returns `{ isLoading: false, pullRequest: null }` when the plugin is disabled or the read fails. The name leaves only the typings. `bb-plugin-build` keeps it in the `@get-bb/plugin-sdk/app` runtime shim's export list (`RETIRED_PLUGIN_SDK_APP_EXPORTS` in `packages/plugin-build/src/build-plugin-app.ts`), so plugins that still import it build and run, because git-sourced marketplace plugins are built by bb at install and update and path and builtin plugins rebuild when the SDK version changes. An import of it is a build warning carrying the replacement call: `bb plugin build` and `bb plugin dev` print it, and the server writes it to the plugin's log and the server log when it builds the plugin. Callers are marketplace plugins written against the old SDK (t3sidebar, dockside, gtd-sidebar, thread-inbox, radar-sidebar, bb-sidebar, sidebar-plus, cursor-sidebar, switchboard, vantage, jb-flow, tinted-threads among them). Remove the runtime member and the shim entry only after those plugins have migrated.
 
 ## Unified tabs (`experimental_tab`)
 

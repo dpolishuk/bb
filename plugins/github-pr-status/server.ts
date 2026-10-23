@@ -426,7 +426,7 @@ export default function githubPrStatusPlugin(bb: BbPluginApi): void {
   bb.rpc.register(
     githubPrStatusRpcContract,
     {
-      async experimental_pullRequests({ keys }, context) {
+      async pullRequests({ keys }, context) {
         const viewer = context.experimental_caller.kind === "client";
         const results = await Promise.all(
           keys.map(
@@ -448,7 +448,7 @@ export default function githubPrStatusPlugin(bb: BbPluginApi): void {
   );
 
   bb.rpc.experimental_whileWatched(
-    "experimental_pullRequests",
+    "pullRequests",
     (read, signal) => {
       if (!("key" in read)) return;
       store.watch(read.key, signal);

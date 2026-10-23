@@ -228,7 +228,7 @@ const environmentActionInputSchema = z
 const actionOutputSchema = z.object({ message: z.string() }).strict();
 
 export const githubPrStatusRpcContract = defineRpcContract({
-  experimental_pullRequests: {
+  pullRequests: {
     experimental_description:
       "Linked GitHub pull requests for each environment, current branch first, keyed by environment id.",
     input: z

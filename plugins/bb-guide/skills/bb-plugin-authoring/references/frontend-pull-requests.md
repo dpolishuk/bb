@@ -2,7 +2,7 @@
 
 The bundled GitHub PR Status plugin
 (`bb--github-pr-status`) owns pull request data. Copy the part of its contract you
-read; `bb plugin rpc inspect bb--github-pr-status experimental_pullRequests` prints the full
+read; `bb plugin rpc inspect bb--github-pr-status pullRequests` prints the full
 schema. Each key is an environment id and each row is `available` with a
 a `pullRequests` list (current branch first), `absent`, or `unavailable` (the machine is offline or `gh`
 failed). Treat a query error, `absent` and `unavailable` as nothing to show.
@@ -15,7 +15,7 @@ import { experimental_useRpcKeyedQuery } from "@get-bb/plugin-sdk/app";
 import { z } from "zod";
 
 const githubPrStatus = defineRpcContract({
-  experimental_pullRequests: {
+  pullRequests: {
     input: z.object({ keys: z.array(z.string()) }),
     output: z.record(
       z.string(),
@@ -48,7 +48,7 @@ function useRowPullRequest(thread: PluginSidebarThread) {
   const { data } = experimental_useRpcKeyedQuery({
     pluginId: "bb--github-pr-status",
     contract: githubPrStatus,
-    method: "experimental_pullRequests",
+    method: "pullRequests",
     keys: environmentId ? [environmentId] : [],
   });
   const row = environmentId ? data?.[environmentId] : undefined;
@@ -59,7 +59,7 @@ function useRowPullRequest(thread: PluginSidebarThread) {
 ```
 
 In `renderSlot(...)` tests, answer the read with the `rpc` option:
-`rpc: { experimental_pullRequests: ({ keys }) => ... }`.
+`rpc: { pullRequests: ({ keys }) => ... }`.
 
 ## Migrating from `experimental_useSidebarThreadPullRequest`
 
@@ -71,7 +71,7 @@ build resolves the name to the app's runtime member, prints a warning that
 names this replacement, and bb writes the same warning to the plugin's log
 when it builds the plugin at install, update or SDK change. The runtime member
 reads the same data and returns `{ isLoading: false, pullRequest: null }` when
-GitHub PR Status is disabled. To migrate, read `experimental_pullRequests` as above with
+GitHub PR Status is disabled. To migrate, read `pullRequests` as above with
 `thread.environment?.id` in place of the thread id. Fields map as follows:
 `number`, `title`, `url`, `state` and `attention` keep their names;
 `experimental_autoMerge` is `autoMerge`, `experimental_inMergeQueue` is

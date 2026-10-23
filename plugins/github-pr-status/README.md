@@ -3,7 +3,7 @@
 Owns GitHub pull request data and actions for bb environments. Bundled and enabled by default.
 
 - `host.ts` batches GraphQL reads through `gh api graphql` and runs `gh pr ready|merge` in the environment's workspace on its machine.
-- `server.ts` resolves environments, assembles the status core's PR UI renders, serves the keyed `experimental_pullRequests` read and the `markReady`, `markDraft` and `merge` mutations, and registers `bb pull-request`.
+- `server.ts` resolves environments, assembles the status core's PR UI renders, serves the keyed `pullRequests` read and the `markReady`, `markDraft` and `merge` mutations, and registers `bb pull-request`.
 - `store.ts` shares snapshots, in-flight reads and pending-check timers by PR URL, and publishes only changed rows.
 - `persistence.ts` uses the plugin's own database through `bb.storage.database()` / `migrate()`. It stores current snapshots and environment links, including known absence. There is no history or core database migration. Identical PR content and links do not write rows; a restart serves saved content immediately and refreshes overdue data in the background.
 - `contract.ts` is the public contract. Core's composer banner, Info row and sidebar shim read through it with `pluginId: "bb--github-pr-status"`, the way any other plugin would.

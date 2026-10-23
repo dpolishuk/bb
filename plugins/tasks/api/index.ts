@@ -507,7 +507,7 @@ async function readEnvironmentPullRequests(
         rows,
         await bb.sdk.plugins.callRpc({
           pluginId: GITHUB_PR_STATUS_PLUGIN_ID,
-          method: "experimental_pullRequests",
+          method: "pullRequests",
           input: { keys },
           outputSchema: environmentPullRequestsSchema,
         }),

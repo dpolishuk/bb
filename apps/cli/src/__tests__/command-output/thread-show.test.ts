@@ -370,7 +370,7 @@ describe("bb thread show command output", () => {
     await runCommand(["thread", "show", "thread-show-pr"], register);
 
     expect(rpc.urls).toEqual([
-      "http://server/api/v1/plugins/bb--github-pr-status/rpc/experimental_pullRequests",
+      "http://server/api/v1/plugins/bb--github-pr-status/rpc/pullRequests",
     ]);
     expect(rpc.bodies).toEqual([{ keys: ["env-show-pr"] }]);
     const output = collectLogLines(vi.mocked(console.log)).join("\n");

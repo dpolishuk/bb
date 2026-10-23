@@ -1462,7 +1462,7 @@ export default async function plugin(bb: BbPluginApi) {
           environmentId = thread.environmentId;
           const rows = await bb.sdk.plugins.callRpc({
             pluginId: "bb--github-pr-status",
-            method: "experimental_pullRequests",
+            method: "pullRequests",
             input: { keys: [thread.environmentId] },
             outputSchema: environmentPullRequestUrlsSchema,
           });

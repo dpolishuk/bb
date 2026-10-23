@@ -104,7 +104,7 @@ describe("GitHub PR Status server", () => {
   it("keeps identical snapshots unchanged across a real plugin database reload", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     const fake = await setup({});
-    await fake.harness.callRpc("experimental_pullRequests", {
+    await fake.harness.callRpc("pullRequests", {
       keys: ["env-1"],
     });
     const next = await fake.harness.reload(plugin);
@@ -113,7 +113,7 @@ describe("GitHub PR Status server", () => {
       .prepare("SELECT total_changes() AS n")
       .get();
     vi.setSystemTime(Date.now() + 11_000);
-    await next.harness.callRpc("experimental_pullRequests", {
+    await next.harness.callRpc("pullRequests", {
       keys: ["env-1"],
     });
     expect(
@@ -127,7 +127,7 @@ describe("GitHub PR Status server", () => {
     ["malformed snapshot JSON", "{invalid"],
   ])("discards %s on reload and refetches", async (_, content) => {
     const fake = await setup({});
-    await fake.harness.callRpc("experimental_pullRequests", {
+    await fake.harness.callRpc("pullRequests", {
       keys: ["env-1"],
     });
     fake.bb.storage
@@ -140,7 +140,7 @@ describe("GitHub PR Status server", () => {
       next.bb.storage.database().prepare("SELECT url FROM snapshots").all(),
     ).toEqual([]);
     await expect(
-      next.harness.callRpc("experimental_pullRequests", { keys: ["env-1"] }),
+      next.harness.callRpc("pullRequests", { keys: ["env-1"] }),
     ).resolves.toMatchObject({
       "env-1": {
         outcome: "available",
@@ -157,7 +157,7 @@ describe("GitHub PR Status server", () => {
 
   it("discards unsupported persisted discovery sources and rediscovers", async () => {
     const fake = await setup({});
-    await fake.harness.callRpc("experimental_pullRequests", {
+    await fake.harness.callRpc("pullRequests", {
       keys: ["env-1"],
     });
     fake.bb.storage
@@ -173,7 +173,7 @@ describe("GitHub PR Status server", () => {
       next.bb.storage.database().prepare("SELECT url FROM snapshots").all(),
     ).toEqual([]);
     await expect(
-      next.harness.callRpc("experimental_pullRequests", { keys: ["env-1"] }),
+      next.harness.callRpc("pullRequests", { keys: ["env-1"] }),
     ).resolves.toMatchObject({
       "env-1": { outcome: "available", pullRequests: [{ number: 7 }] },
     });
@@ -199,7 +199,7 @@ describe("GitHub PR Status server", () => {
     });
 
     await expect(
-      fake.harness.callRpc("experimental_pullRequests", {
+      fake.harness.callRpc("pullRequests", {
         keys: ["env-1", "env-plain", "env-asleep", "env-missing"],
       }),
     ).resolves.toEqual({

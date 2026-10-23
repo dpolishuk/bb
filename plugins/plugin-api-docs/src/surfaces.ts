@@ -1032,7 +1032,7 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
           "mutate, isPending and pendingInputs settle at write acknowledgement; matched reads refresh in the background. Shared predictions stay until confirmed reads arrive, or roll back on write failure",
           "Optimistic updaters must be pure and replayable; generate IDs and timestamps before mutate",
           "RPC error codes may grow: switch on error.code with a fallback. Newer server codes become unknown_error with the original serverCode; transport_error and invalid_response cover client failures. CLI output preserves unknown codes",
-          "GitHub PR Status exposes experimental_pullRequests: environment keys return available with a pullRequests list (current branch first), absent, or unavailable. Core and the retired sidebar shim display the first PR when currentBranchUrl is non-null; linked PRs share persisted snapshots and refreshes. Inspect its discoverable contract with bb plugin rpc inspect bb--github-pr-status",
+          "GitHub PR Status exposes pullRequests: environment keys return available with a pullRequests list (current branch first), absent, or unavailable. Core and the retired sidebar shim display the first PR when currentBranchUrl is non-null; linked PRs share persisted snapshots and refreshes. Inspect its discoverable contract with bb plugin rpc inspect bb--github-pr-status",
         ],
         apiSymbols: [
           "PluginRpc",

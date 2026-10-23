@@ -1885,7 +1885,7 @@ function githubPrStatusRpc(
     }): Promise<TOutput> {
       expect([args.pluginId, args.method]).toEqual([
         "bb--github-pr-status",
-        "experimental_pullRequests",
+        "pullRequests",
       ]);
       const { keys } = args.input as { keys: string[] };
       return args.outputSchema.parse(

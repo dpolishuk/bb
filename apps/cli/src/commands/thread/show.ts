@@ -152,7 +152,7 @@ async function fetchPullRequest(args: {
   try {
     const rows = await args.sdk.plugins.callRpc({
       pluginId: GITHUB_PR_STATUS_PLUGIN_ID,
-      method: "experimental_pullRequests",
+      method: "pullRequests",
       input: { keys: [args.environmentId] },
       outputSchema: z.record(z.string(), environmentPullRequestsSchema),
     });

@@ -74,7 +74,7 @@ export function useEnvironmentPullRequest(
   const query = useRpcKeyedQuery({
     pluginId: GITHUB_PR_STATUS_PLUGIN_ID,
     contract: githubPrStatusRpcContract,
-    method: "experimental_pullRequests",
+    method: "pullRequests",
     keys: enabled && environmentId ? [environmentId] : [],
     enabled,
   });
