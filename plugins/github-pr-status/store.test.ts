@@ -260,7 +260,11 @@ describe("shared pull request refresh", () => {
 
 describe("aligned refresh ticks", () => {
   function pendingAt(number: number): PullRequest {
-    return { ...pending, number, url: `https://github.com/acme/bb/pull/${number}` };
+    return {
+      ...pending,
+      number,
+      url: `https://github.com/acme/bb/pull/${number}`,
+    };
   }
 
   it("refreshes every watched pending PR in the same tick once they are due within half an interval", async () => {
@@ -321,8 +325,18 @@ describe("aligned refresh ticks", () => {
   it.each([
     ["open", 20_000, pullRequest(), 0],
     ["open", 31_000, pullRequest(), 1],
-    ["merged", 50 * 60_000, pullRequest({ state: "merged", attention: "merged" }), 0],
-    ["merged", 61 * 60_000, pullRequest({ state: "merged", attention: "merged" }), 1],
+    [
+      "merged",
+      50 * 60_000,
+      pullRequest({ state: "merged", attention: "merged" }),
+      0,
+    ],
+    [
+      "merged",
+      61 * 60_000,
+      pullRequest({ state: "merged", attention: "merged" }),
+      1,
+    ],
   ])(
     "re-reads a %s PR that comes back into view only when it is stale (%i ms old)",
     async (_state, age, pr, loads) => {

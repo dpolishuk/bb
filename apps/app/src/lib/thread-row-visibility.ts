@@ -1,4 +1,9 @@
-import { useCallback, useRef, useSyncExternalStore, type RefObject } from "react";
+import {
+  useCallback,
+  useRef,
+  useSyncExternalStore,
+  type RefObject,
+} from "react";
 
 export type ThreadRowVisibility = "offscreen" | "near" | "onscreen" | "live";
 

@@ -5,7 +5,10 @@ import type {
 } from "@get-bb/plugin-sdk";
 import { PluginSlotMount } from "@/components/plugin/PluginSlotMount";
 import { compareGroupedPlacement } from "@/lib/grouped-placement";
-import { usePluginSlots, type PluginThreadRowItemSlot } from "@/lib/plugin-slots";
+import {
+  usePluginSlots,
+  type PluginThreadRowItemSlot,
+} from "@/lib/plugin-slots";
 import { useThreadRowVisibility } from "@/lib/thread-row-visibility";
 
 function sortThreadRowItems(

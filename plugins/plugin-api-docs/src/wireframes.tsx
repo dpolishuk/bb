@@ -473,9 +473,13 @@ function TrafficLights() {
   );
 }
 
-const SIDEBAR_THREADS: readonly { title: string; glyph?: "spin" | "dot" }[] = [
+const SIDEBAR_THREADS: readonly {
+  title: string;
+  glyph?: "spin" | "dot";
+  pullRequest?: boolean;
+}[] = [
   { title: "Fix flaky checkout tests", glyph: "spin" },
-  { title: "Refactor settings page" },
+  { title: "Refactor settings page", pullRequest: true },
   { title: "Ship dark mode", glyph: "dot" },
 ];
 
@@ -563,6 +567,24 @@ const SIDEBAR_SECTION_RENDERERS: Record<string, () => ReactNode> = {
           className="flex h-6.5 items-center gap-2 rounded-md px-2"
         >
           <span className="min-w-0 flex-1 truncate">{thread.title}</span>
+          {thread.pullRequest ? (
+            <Mark
+              id="thread-row-items"
+              label="A pull request badge a plugin added to the row"
+              className="z-[2] flex size-5 shrink-0 items-center justify-center"
+            >
+              <span className="relative flex size-4 items-center justify-center">
+                <MiniIcon
+                  icon="GitPullRequestArrow"
+                  className="size-3.5 text-success"
+                />
+                <span
+                  aria-hidden
+                  className="absolute -bottom-px -right-px size-1.5 rounded-full bg-warning"
+                />
+              </span>
+            </Mark>
+          ) : null}
           {thread.glyph === "spin" ? (
             <Mark
               id="thread-row-status"

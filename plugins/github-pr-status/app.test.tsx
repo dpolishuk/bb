@@ -165,7 +165,10 @@ describe("pull request row item", () => {
       },
     ],
     ["there is no PR", { outcome: "absent" }],
-    ["the lookup is unavailable", { outcome: "unavailable", message: "asleep" }],
+    [
+      "the lookup is unavailable",
+      { outcome: "unavailable", message: "asleep" },
+    ],
   ])("draws nothing when %s", async (_case, row) => {
     const view = renderRow(
       { thread: thread("env_row"), isLive: true },

@@ -5,7 +5,8 @@
   "type": "module",
   "description": "GitHub pull request status and actions for each environment's branch",
   "engines": {
-    "bb": ">=0.0"
+    "bb": ">=0.0",
+    "bbPluginSdk": ">=0.6.76"
   },
   "bb": {
     "name": "GitHub PR Status",

@@ -440,16 +440,22 @@ it("watches each keyed row once while held, releasing only keys that leave", asy
     probe.rerender({ keys: ["c", "d", "e"] });
     expect(
       watch.mock.calls.map(([, , read]) => ("key" in read ? read.key : null)),
-    ).toEqual([
-      "a",
-      "b",
-      "c",
-      "d",
-      "e",
-    ]);
-    expect(Object.fromEntries(active)).toEqual({ a: 0, b: 0, c: 1, d: 1, e: 1 });
+    ).toEqual(["a", "b", "c", "d", "e"]);
+    expect(Object.fromEntries(active)).toEqual({
+      a: 0,
+      b: 0,
+      c: 1,
+      d: 1,
+      e: 1,
+    });
     probe.unmount();
-    expect(Object.fromEntries(active)).toEqual({ a: 0, b: 0, c: 0, d: 0, e: 0 });
+    expect(Object.fromEntries(active)).toEqual({
+      a: 0,
+      b: 0,
+      c: 0,
+      d: 0,
+      e: 0,
+    });
   } finally {
     client.clear();
   }

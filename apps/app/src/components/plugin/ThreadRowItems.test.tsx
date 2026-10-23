@@ -156,9 +156,7 @@ describe("thread row items", () => {
 
   it("orders items, renders nothing without contributions, and drops only a crashing item", () => {
     const empty = renderRow();
-    expect(
-      empty.row.querySelector("[data-thread-row-items]"),
-    ).toBeNull();
+    expect(empty.row.querySelector("[data-thread-row-items]")).toBeNull();
     empty.unmount();
     vi.spyOn(console, "warn").mockImplementation(() => {});
     vi.spyOn(console, "error").mockImplementation(() => {});
@@ -175,8 +173,8 @@ describe("thread row items", () => {
     );
     const { row } = renderRow();
     expect(
-      [...row.querySelectorAll("[data-testid]")].map(
-        (element) => element.getAttribute("data-testid"),
+      [...row.querySelectorAll("[data-testid]")].map((element) =>
+        element.getAttribute("data-testid"),
       ),
     ).toEqual(["first", "second", "unordered"]);
   });

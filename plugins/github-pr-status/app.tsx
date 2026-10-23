@@ -98,7 +98,10 @@ export function PullRequestBadge({
   );
 }
 
-function PullRequestRowItem({ thread, isLive }: ExperimentalThreadRowItemProps) {
+function PullRequestRowItem({
+  thread,
+  isLive,
+}: ExperimentalThreadRowItemProps) {
   const environmentId = thread.environment?.id ?? null;
   const query = experimental_useRpcKeyedQuery({
     contract: githubPrStatusRpcContract,

@@ -1,7 +1,4 @@
-import type {
-  PullRequest,
-  PullRequestState,
-} from "./contract.js";
+import type { PullRequest, PullRequestState } from "./contract.js";
 import type { IconName } from "@bb/shared-ui/icon";
 
 interface PullRequestDisplay {
