@@ -6,11 +6,18 @@ draw the same items with `experimental_ThreadRowItems` (see "bb's row items on
 your row"). The GitHub PR Status plugin's pull request badge is one.
 
 ```tsx
-app.slots.experimental_threadRowItem({ id: "deploy", order: 10, component: DeployBadge });
+app.slots.experimental_threadRowItem({
+  id: "deploy",
+  order: 10,
+  component: DeployBadge,
+});
 function DeployBadge({ thread, isLive }: ExperimentalThreadRowItemProps) {
   const key = thread.environment?.id;
   const { data } = experimental_useRpcKeyedQuery({
-    contract, method: "deploys", keys: key ? [key] : [], enabled: isLive && key !== undefined,
+    contract,
+    method: "deploys",
+    keys: key ? [key] : [],
+    enabled: isLive && key !== undefined,
   });
   const deploy = key ? data?.[key] : undefined;
   return deploy ? <DeployGlyph deploy={deploy} /> : null;
