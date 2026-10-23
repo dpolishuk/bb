@@ -223,7 +223,9 @@ export function isEnvironmentPullRequestStale(
 ): boolean {
   return (
     now - loadedAt >
-    pullRequestStaleAfterMs(row.outcome === "available" ? row.pullRequest : null)
+    pullRequestStaleAfterMs(
+      row.outcome === "available" ? row.pullRequest : null,
+    )
   );
 }
 

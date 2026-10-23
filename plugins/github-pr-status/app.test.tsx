@@ -9,7 +9,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   githubPrStatusRpcContract,
-  type EnvironmentPullRequests,
+  type EnvironmentPullRequest,
   type PullRequest,
 } from "./contract.js";
 
@@ -79,7 +79,6 @@ function pullRequest(overrides: Partial<PullRequest> = {}): PullRequest {
     url: "https://github.com/get-bb/bb/pull/6143",
     baseRefName: "main",
     headRefName: "bb/row",
-    headRefOid: null,
     updatedAt: "2026-10-22T00:00:00Z",
     autoMerge: false,
     inMergeQueue: false,
@@ -115,7 +114,7 @@ function Row(props: ExperimentalThreadRowItemProps) {
 
 function renderRow(
   props: ExperimentalThreadRowItemProps,
-  rows: Record<string, EnvironmentPullRequests>,
+  rows: Record<string, EnvironmentPullRequest>,
 ) {
   return renderSlot<
     ExperimentalThreadRowItemProps,
@@ -123,7 +122,7 @@ function renderRow(
   >({ component: Row }, props, {
     experimental_rpcContract: githubPrStatusRpcContract,
     rpc: {
-      experimental_pullRequests: ({ keys }) =>
+      pullRequests: ({ keys }) =>
         Object.fromEntries(keys.map((key) => [key, rows[key]!])),
       markReady: unexpectedAction,
       markDraft: unexpectedAction,
@@ -135,11 +134,10 @@ function renderRow(
 describe("pull request row item", () => {
   it("reads nothing until the row is live, then draws the current-branch PR's state and checks", async () => {
     const pr = pullRequest();
-    const rows: Record<string, EnvironmentPullRequests> = {
+    const rows: Record<string, EnvironmentPullRequest> = {
       env_row: {
         outcome: "available",
-        pullRequests: [pr],
-        currentBranchUrl: pr.url,
+        pullRequest: pr,
       },
     };
     const view = renderRow({ thread: thread("env_row"), isLive: false }, rows);
@@ -155,15 +153,7 @@ describe("pull request row item", () => {
     expect(view.inspection.rpcCalls).toHaveLength(1);
   });
 
-  it.each<[string, EnvironmentPullRequests]>([
-    [
-      "only a previous branch has a PR",
-      {
-        outcome: "available",
-        pullRequests: [pullRequest({ state: "merged", attention: "merged" })],
-        currentBranchUrl: null,
-      },
-    ],
+  it.each<[string, EnvironmentPullRequest]>([
     ["there is no PR", { outcome: "absent" }],
     [
       "the lookup is unavailable",
@@ -185,8 +175,7 @@ describe("pull request row item", () => {
       {
         env_row: {
           outcome: "available",
-          pullRequests: [pr],
-          currentBranchUrl: pr.url,
+          pullRequest: pr,
         },
       },
     );
@@ -203,8 +192,7 @@ describe("pull request row item", () => {
       {
         env_row: {
           outcome: "available",
-          pullRequests: [pr],
-          currentBranchUrl: pr.url,
+          pullRequest: pr,
         },
       },
     );
@@ -213,7 +201,9 @@ describe("pull request row item", () => {
     });
     fireEvent.pointerEnter(badge);
     fireEvent.pointerMove(
-      view.getByRole("img", { name: "Pull request #6143, open, checks running" }),
+      view.getByRole("img", {
+        name: "Pull request #6143, open, checks running",
+      }),
     );
     expect(
       await view.findAllByText("#6143 Share and persist GitHub PR refreshes"),

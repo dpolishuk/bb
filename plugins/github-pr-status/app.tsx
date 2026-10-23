@@ -11,11 +11,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import {
-  currentPullRequest,
-  githubPrStatusRpcContract,
-  type PullRequest,
-} from "./contract.js";
+import { githubPrStatusRpcContract, type PullRequest } from "./contract.js";
 import {
   PULL_REQUEST_STATE_DISPLAY,
   describePullRequestStatus,
@@ -110,12 +106,12 @@ function PullRequestRowItem({
   const environmentId = thread.environment?.id ?? null;
   const query = experimental_useRpcKeyedQuery({
     contract: githubPrStatusRpcContract,
-    method: "experimental_pullRequests",
+    method: "pullRequests",
     keys: environmentId === null ? [] : [environmentId],
     enabled: isLive && environmentId !== null,
   });
   const row = environmentId === null ? undefined : query.data?.[environmentId];
-  const pullRequest = row === undefined ? null : currentPullRequest(row);
+  const pullRequest = row?.outcome === "available" ? row.pullRequest : null;
   return pullRequest === null ? null : (
     <PullRequestBadge pullRequest={pullRequest} />
   );
