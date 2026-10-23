@@ -6,6 +6,7 @@ import { PLUGIN_SDK_MAJOR } from "@bb/domain";
 import {
   assertValidPluginCompactIconSvg,
   assertValidPluginIconSvg,
+  dropHostProvidedTailwind,
 } from "@bb/plugin-build";
 
 interface PluginArtifactMeta {
@@ -42,8 +43,25 @@ interface PluginAppState {
 
 interface PluginAppAssets {
   jsPath: string;
-  cssPath: string | null;
+  css: Buffer | null;
   hash: string;
+}
+
+export interface PluginAppAsset {
+  hash: string;
+  read(): Promise<Buffer>;
+}
+
+export function pluginAppAsset(
+  assets: PluginAppAssets,
+  kind: "js" | "css",
+): PluginAppAsset | undefined {
+  if (kind === "js")
+    return { hash: assets.hash, read: () => readFile(assets.jsPath) };
+  const css = assets.css;
+  return css === null
+    ? undefined
+    : { hash: assets.hash, read: async () => css };
 }
 
 export interface PluginAppBundleSnapshot {
@@ -313,7 +331,9 @@ export async function loadPluginAppBundle(
   }
   let css: Buffer | null;
   try {
-    css = await readFile(cssPath);
+    css = Buffer.from(
+      dropHostProvidedTailwind(await readFile(cssPath, "utf8")),
+    );
   } catch {
     css = null;
   }
@@ -337,6 +357,6 @@ export async function loadPluginAppBundle(
         compatible: meta.sdkMajor === PLUGIN_SDK_MAJOR,
       },
     },
-    assets: { jsPath, cssPath: css !== null ? cssPath : null, hash },
+    assets: { jsPath, css, hash },
   };
 }
