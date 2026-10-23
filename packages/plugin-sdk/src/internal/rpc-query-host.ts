@@ -315,18 +315,32 @@ export function createRpcQueryHooks(useHost: () => RpcQueryHost) {
       [keys, enabled, selectRows],
     );
     const query = useQuerySelection(subscribe, getSnapshot, select);
+    const watches = useMemo(
+      () => new Map<string, (() => void) | undefined>(),
+      [host, pluginId, options.method],
+    );
+    useEffect(
+      () => () => {
+        for (const release of watches.values()) release?.();
+        watches.clear();
+      },
+      [watches],
+    );
     useEffect(() => {
-      if (!enabled) return;
-      const releases = keys.map((key) =>
-        host.watch?.(pluginId, options.method, { key }),
-      );
-      return () => {
-        releases.forEach((release) => release?.());
-      };
-    }, [host, pluginId, options.method, keys, enabled]);
+      const wanted = new Set(enabled ? keys : []);
+      for (const [key, release] of watches) {
+        if (wanted.has(key)) continue;
+        release?.();
+        watches.delete(key);
+      }
+      for (const key of wanted) {
+        if (!watches.has(key))
+          watches.set(key, host.watch?.(pluginId, options.method, { key }));
+      }
+    }, [host, pluginId, options.method, keys, enabled, watches]);
     const refetch = useCallback(async () => {
-      await current.observer.refetch();
-    }, [current]);
+      await current.refresh(keys);
+    }, [current, keys]);
     return {
       ...query,
       refetch,

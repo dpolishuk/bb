@@ -374,6 +374,7 @@ export function createTaggedKeyedQueryOwner<Value>(options: {
   registerKeyedView(client, queryKey, keyedRowsView(collection));
   const keys = new Map<string, number>();
   let readingKeys = new Set<string>();
+  let collecting = false;
   let missingOnly = false;
   let refreshAll = false;
   const dirtyKeys = new Set<string>();
@@ -410,7 +411,9 @@ export function createTaggedKeyedQueryOwner<Value>(options: {
       const refreshedKeys = new Set<string>();
       let refreshedAll = false;
       return runTaggedRead(client, queryKey, async () => {
+        collecting = true;
         const subscribed = await collectSubscribedKeys();
+        collecting = false;
         const all = refreshAll || refresh;
         refresh = false;
         const dirty = new Set(dirtyKeys);
@@ -481,6 +484,21 @@ export function createTaggedKeyedQueryOwner<Value>(options: {
   let stop: (() => void) | undefined;
   return {
     observer,
+    async refresh(requested: readonly string[]): Promise<void> {
+      const subscribed = requested.filter((key) => keys.has(key));
+      if (subscribed.length === 0) return;
+      const fetching =
+        observer.getCurrentQuery().state.fetchStatus === "fetching";
+      const unread =
+        fetching && !collecting
+          ? subscribed.filter((key) => !readingKeys.has(key))
+          : subscribed;
+      if (unread.length === 0) return;
+      for (const key of unread) dirtyKeys.add(key);
+      if (fetching && !collecting)
+        restartTaggedRead(observer.getCurrentQuery());
+      await observer.refetch({ cancelRefetch: false });
+    },
     subscribe(requested: readonly string[], listener: () => void) {
       let added = false;
       for (const key of requested) {

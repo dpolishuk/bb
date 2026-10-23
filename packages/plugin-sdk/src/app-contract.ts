@@ -4855,7 +4855,7 @@ export interface ExperimentalRpcQueryState<T> {
   isLoading: boolean;
   /** A read attempt is active, including background refreshes. Keyed consumers share this activity for their method; offline-paused reads are not fetching. */
   isFetching: boolean;
-  /** Force a read regardless of freshness and wait for its attempt/retries. Keyed reads refresh the method's subscribed keys. Failures update error and retain data; this promise resolves rather than rejecting. */
+  /** Force a read regardless of freshness and wait for its attempt/retries. Keyed reads refresh only this hook's keys, batched with other hooks refreshing in the same render. Failures update error and retain data; this promise resolves rather than rejecting. */
   refetch(): Promise<void>;
 }
 
@@ -4963,7 +4963,7 @@ export interface PluginSdkApp {
   >(
     options: ExperimentalRpcMutationOptions<Contract, Method>,
   ): ExperimentalRpcMutationState<Contract[Method]>;
-  /** Cache each key independently and batch missing or invalidated keys in the same render. */
+  /** Cache each key independently and batch missing or invalidated keys in the same render. Each key is watched once while the hook holds it, so a changing key list subscribes only added keys and releases only removed ones. */
   experimental_useRpcKeyedQuery<
     Contract extends PluginRpcContract,
     Method extends ExperimentalRpcKeyedMethod<Contract>,
