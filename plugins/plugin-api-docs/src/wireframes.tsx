@@ -479,8 +479,8 @@ const SIDEBAR_THREADS: readonly {
   pullRequest?: boolean;
 }[] = [
   { title: "Fix flaky checkout tests", glyph: "spin" },
-  { title: "Refactor settings page", pullRequest: true },
-  { title: "Ship dark mode", glyph: "dot" },
+  { title: "Refactor settings page" },
+  { title: "Ship dark mode", glyph: "dot", pullRequest: true },
 ];
 
 const FOOTER_ITEM_RENDERERS: Record<string, () => ReactNode> = {
@@ -571,7 +571,7 @@ const SIDEBAR_SECTION_RENDERERS: Record<string, () => ReactNode> = {
             <Mark
               id="thread-row-items"
               label="A pull request badge a plugin added to the row"
-              className="z-[2] flex size-5 shrink-0 items-center justify-center"
+              className="z-[2] flex h-5 w-9 shrink-0 items-center justify-start pl-0.5"
             >
               <span className="relative flex size-4 items-center justify-center">
                 <MiniIcon

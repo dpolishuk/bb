@@ -253,7 +253,7 @@
       "responsiveStrategy": "scale-together",
       "requiredStates": ["anchor"],
       "labels": {
-        "anchor": ["Refactor settings page"]
+        "anchor": ["Ship dark mode"]
       },
       "fixtureClassAnchors": ["size-4", "size-1.5", "rounded-full"],
       "sources": [

@@ -134,7 +134,7 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
           "Add a small badge to every thread's row in the sidebar, beside its title. With this, a plugin can:",
         bullets: [
           "Show per-thread state at a glance, like the GitHub PR Status plugin's pull request state and checks",
-          "Read only for rows on screen once scrolling pauses, batched into one request, and draw cached data at once",
+          "Read only rows on screen once scrolling pauses, in one batched request, and draw cached data at once",
           "Appear on rows of plugin-built thread lists too, which render the same items",
         ],
         apiSymbols: [
