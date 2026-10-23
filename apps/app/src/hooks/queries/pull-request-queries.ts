@@ -3,11 +3,13 @@ import type { InstalledPlugin } from "@bb/server-contract";
 import { pluginListQueryOptions } from "./plugin-settings-queries";
 import { useEffect, useRef } from "react";
 import {
-  GITHUB_PR_STATUS_PLUGIN_ID,
   githubPrStatusRpcContract,
-  isEnvironmentPullRequestStale,
   type PullRequest,
 } from "bb-plugin-bb--github-pr-status/contract";
+import {
+  GITHUB_PR_STATUS_PLUGIN_ID,
+  isEnvironmentPullRequestStale,
+} from "bb-plugin-bb--github-pr-status/read-contract";
 import {
   experimental_useRpcKeyedQuery as useRpcKeyedQuery,
   experimental_useRpcMutation as useRpcMutation,

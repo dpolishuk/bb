@@ -8,7 +8,6 @@ import {
 import { assemblePullRequest } from "./assemble.js";
 import {
   HOST_VIEWS_MAX_READS,
-  environmentPullRequestTag,
   githubPrStatusHostContract,
   githubPrStatusRpcContract,
   type EnvironmentPullRequest,
@@ -17,6 +16,7 @@ import {
   type PullRequest,
 } from "./contract.js";
 import { createPullRequestPersistence } from "./persistence.js";
+import { environmentPullRequestTag } from "./read-contract.js";
 import { createPullRequestStore } from "./store.js";
 
 const JSON_OPTION = {
@@ -529,11 +529,12 @@ export default function githubPrStatusPlugin(bb: BbPluginApi): void {
   bb.rpc.register(
     githubPrStatusRpcContract,
     {
-      async pullRequests({ keys }, context) {
+      async pullRequests({ keys, maxAgeMs }, context) {
         const viewer = context.experimental_caller.kind === "client";
         const results = await Promise.all(
           keys.map(
-            async (key) => [key, await store.read(key, { viewer })] as const,
+            async (key) =>
+              [key, await store.read(key, { viewer, maxAgeMs })] as const,
           ),
         );
         return Object.fromEntries(results);

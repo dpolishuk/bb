@@ -11,7 +11,11 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import { githubPrStatusRpcContract, type PullRequest } from "./contract.js";
+import type { PullRequest } from "./contract.js";
+import {
+  PULL_REQUESTS_ANY_AGE_MS,
+  pullRequestsReadContract,
+} from "./read-contract.js";
 import {
   PULL_REQUEST_STATE_DISPLAY,
   describePullRequestStatus,
@@ -99,15 +103,18 @@ export function PullRequestBadge({
   );
 }
 
+const ROW_READ_INPUT = { maxAgeMs: PULL_REQUESTS_ANY_AGE_MS };
+
 function PullRequestRowItem({
   thread,
   isLive,
 }: ExperimentalThreadRowItemProps) {
   const environmentId = thread.environment?.id ?? null;
   const query = experimental_useRpcKeyedQuery({
-    contract: githubPrStatusRpcContract,
+    contract: pullRequestsReadContract,
     method: "pullRequests",
     keys: environmentId === null ? [] : [environmentId],
+    input: ROW_READ_INPUT,
     enabled: isLive && environmentId !== null,
   });
   const row = environmentId === null ? undefined : query.data?.[environmentId];

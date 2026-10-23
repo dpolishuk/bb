@@ -1,8 +1,5 @@
-import {
-  pullRequestStaleAfterMs,
-  type EnvironmentPullRequest,
-  type PullRequest,
-} from "./contract.js";
+import type { EnvironmentPullRequest, PullRequest } from "./contract.js";
+import { pullRequestStaleAfterMs } from "./read-contract.js";
 import type { PullRequestPersistence } from "./persistence.js";
 
 const CACHE_TTL_MS = 10_000;
@@ -264,11 +261,17 @@ export function createPullRequestStore(options: {
 
   async function read(
     environmentId: string,
-    { viewer, rule = "ttl" }: { viewer: boolean; rule?: "ttl" | "watch" },
+    {
+      viewer,
+      rule = "ttl",
+      maxAgeMs,
+    }: { viewer: boolean; rule?: "ttl" | "watch"; maxAgeMs?: number },
   ): Promise<EnvironmentPullRequest> {
     const cached = lookups.get(environmentId);
     const immediate =
-      viewer && restored.has(environmentId) && cached !== undefined;
+      cached !== undefined &&
+      ((viewer && restored.has(environmentId)) ||
+        (maxAgeMs !== undefined && Date.now() - cached.fetchedAt <= maxAgeMs));
     if (viewer) restored.delete(environmentId);
     if (
       cached === undefined ||

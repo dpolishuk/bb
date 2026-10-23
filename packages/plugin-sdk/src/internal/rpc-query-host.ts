@@ -62,17 +62,48 @@ const rpcQueryKey = (pluginId: string, method: string, input: JsonValue) => [
   method,
   input,
 ];
-const keyedQueryKey = (pluginId: string, method: string) =>
-  rpcQueryKey(pluginId, method, { keyed: true });
+const keyedQueryKey = (
+  pluginId: string,
+  method: string,
+  input: JsonValue | null,
+) =>
+  rpcQueryKey(
+    pluginId,
+    method,
+    input === null ? { keyed: true } : { keyed: true, input },
+  );
 const keyedCollections = new Map<string, KeyedCollection<unknown>>();
-function keyedCollection(pluginId: string, method: string) {
-  const name = JSON.stringify([pluginId, method]);
+const keyedCollectionsByMethod = new Map<
+  string,
+  Set<KeyedCollection<unknown>>
+>();
+function keyedCollection(
+  pluginId: string,
+  method: string,
+  inputIdentity: string | null = null,
+) {
+  const name = JSON.stringify(
+    inputIdentity === null
+      ? [pluginId, method]
+      : [pluginId, method, inputIdentity],
+  );
   let collection = keyedCollections.get(name);
   if (!collection) {
     collection = new KeyedCollection(name);
     keyedCollections.set(name, collection);
+    const methodName = JSON.stringify([pluginId, method]);
+    const forMethod = keyedCollectionsByMethod.get(methodName) ?? new Set();
+    forMethod.add(collection);
+    keyedCollectionsByMethod.set(methodName, forMethod);
   }
   return collection;
+}
+function keyedCollectionsFor(pluginId: string, method: string) {
+  return [
+    ...(keyedCollectionsByMethod.get(JSON.stringify([pluginId, method])) ?? [
+      keyedCollection(pluginId, method),
+    ]),
+  ];
 }
 function parsedUpdate<Value>(update: (current: Value) => unknown) {
   return (current: unknown) => jsonValueSchema.parse(update(current as Value));
@@ -92,13 +123,10 @@ function optimisticCache<Contract extends PluginRpcContract>(
       );
     },
     updateKey(method, key, update) {
-      updates.push(
-        optimisticKeyedUpdate(
-          keyedCollection(pluginId, method),
-          key,
-          parsedUpdate(update),
-        ),
-      );
+      for (const collection of keyedCollectionsFor(pluginId, method))
+        updates.push(
+          optimisticKeyedUpdate(collection, key, parsedUpdate(update)),
+        );
     },
   };
 }
@@ -226,6 +254,7 @@ export function createRpcQueryHooks(useHost: () => RpcQueryHost) {
     pluginId?: string;
     method: Method;
     keys: readonly string[];
+    input?: Omit<StandardSchemaV1InferInput<Contract[Method]["input"]>, "keys">;
     enabled?: boolean;
     select?(
       data: Record<string, ExperimentalRpcKeyedValue<Contract[Method]>>,
@@ -248,21 +277,35 @@ export function createRpcQueryHooks(useHost: () => RpcQueryHost) {
       cache = new Map();
       owners.set(host.queryClient, cache);
     }
-    const id = JSON.stringify([pluginId, options.method]);
+    const extra =
+      options.input === undefined
+        ? null
+        : z.record(z.string(), jsonValueSchema).parse(options.input);
+    const inputIdentity =
+      extra === null || Object.keys(extra).length === 0
+        ? null
+        : canonicalPluginReadInput(extra);
+    const id = JSON.stringify([pluginId, options.method, inputIdentity]);
     let owner = cache.get(id);
     if (!owner) {
+      const fields: Record<string, JsonValue> =
+        inputIdentity === null ? {} : { ...extra };
       owner = createTaggedKeyedQueryOwner({
         client: host.queryClient,
-        queryKey: keyedQueryKey(pluginId, options.method),
+        queryKey: keyedQueryKey(
+          pluginId,
+          options.method,
+          inputIdentity === null ? null : fields,
+        ),
         scope: pluginTagScope(pluginId),
-        collection: keyedCollection(pluginId, options.method),
+        collection: keyedCollection(pluginId, options.method, inputIdentity),
         read: async (keys) => {
           const response = await callRpc(
             host,
             pluginId,
             options.contract,
             options.method,
-            { keys: [...keys] },
+            { ...fields, keys: [...keys] },
           );
           return {
             ...response,

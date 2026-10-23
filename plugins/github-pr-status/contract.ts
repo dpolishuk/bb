@@ -1,8 +1,10 @@
 import { defineRpcContract } from "@get-bb/plugin-sdk";
 import { z } from "zod";
+import {
+  PULL_REQUESTS_MAX_KEYS,
+  environmentPullRequestTag,
+} from "./read-contract.js";
 
-export const GITHUB_PR_STATUS_PLUGIN_ID = "bb--github-pr-status";
-export const PULL_REQUESTS_MAX_KEYS = 200;
 export const HOST_VIEWS_MAX_READS = 200;
 
 const checkStatusSchema = z.enum([
@@ -201,34 +203,6 @@ export type PullRequestMergeMethod = z.infer<
   typeof pullRequestMergeMethodSchema
 >;
 
-export function environmentPullRequestTag(environmentId: string): string {
-  return `environment:${environmentId}`;
-}
-
-const OPEN_PULL_REQUEST_STALE_MS = 30_000;
-const SETTLED_PULL_REQUEST_STALE_MS = 60 * 60_000;
-
-export function pullRequestStaleAfterMs(
-  pullRequest: Pick<PullRequest, "state"> | null,
-): number {
-  return pullRequest?.state === "merged" || pullRequest?.state === "closed"
-    ? SETTLED_PULL_REQUEST_STALE_MS
-    : OPEN_PULL_REQUEST_STALE_MS;
-}
-
-export function isEnvironmentPullRequestStale(
-  row: EnvironmentPullRequest,
-  loadedAt: number,
-  now: number,
-): boolean {
-  return (
-    now - loadedAt >
-    pullRequestStaleAfterMs(
-      row.outcome === "available" ? row.pullRequest : null,
-    )
-  );
-}
-
 const environmentActionInputSchema = z
   .object({ environmentId: z.string().min(1) })
   .strict();
@@ -237,10 +211,11 @@ const actionOutputSchema = z.object({ message: z.string() }).strict();
 export const githubPrStatusRpcContract = defineRpcContract({
   pullRequests: {
     experimental_description:
-      "The GitHub pull request for each environment's current branch, keyed by environment id.",
+      "The GitHub pull request for each environment's current branch, keyed by environment id. maxAgeMs lets saved rows up to that age answer at once while they refresh in the background.",
     input: z
       .object({
         keys: z.array(z.string().min(1)).min(1).max(PULL_REQUESTS_MAX_KEYS),
+        maxAgeMs: z.number().int().nonnegative().optional(),
       })
       .strict(),
     output: z.record(z.string(), environmentPullRequestSchema),

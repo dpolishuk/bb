@@ -1,11 +1,11 @@
 // @vitest-environment jsdom
 
 import { cleanup, renderHook } from "@testing-library/react";
-import {
-  isEnvironmentPullRequestStale,
-  type EnvironmentPullRequest,
-  type PullRequest,
+import type {
+  EnvironmentPullRequest,
+  PullRequest,
 } from "bb-plugin-bb--github-pr-status/contract";
+import { isEnvironmentPullRequestStale } from "bb-plugin-bb--github-pr-status/read-contract";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useEnvironmentPullRequest } from "./pull-request-queries";
 

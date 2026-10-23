@@ -7,11 +7,11 @@ import type {
 import { loadPluginApp, renderSlot } from "@get-bb/plugin-sdk/testing/app";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { afterEach, describe, expect, it } from "vitest";
+import type { EnvironmentPullRequest, PullRequest } from "./contract.js";
 import {
-  githubPrStatusRpcContract,
-  type EnvironmentPullRequest,
-  type PullRequest,
-} from "./contract.js";
+  PULL_REQUESTS_ANY_AGE_MS,
+  pullRequestsReadContract,
+} from "./read-contract.js";
 
 const app = await loadPluginApp(() => import("./app.js"));
 afterEach(cleanup);
@@ -101,9 +101,6 @@ function pullRequest(overrides: Partial<PullRequest> = {}): PullRequest {
 }
 
 const Item = app.threadRowItems[0]!.component;
-function unexpectedAction(): never {
-  throw new Error("row items never act on a pull request");
-}
 function Row(props: ExperimentalThreadRowItemProps) {
   return (
     <TooltipProvider delayDuration={0}>
@@ -118,15 +115,12 @@ function renderRow(
 ) {
   return renderSlot<
     ExperimentalThreadRowItemProps,
-    typeof githubPrStatusRpcContract
+    typeof pullRequestsReadContract
   >({ component: Row }, props, {
-    experimental_rpcContract: githubPrStatusRpcContract,
+    experimental_rpcContract: pullRequestsReadContract,
     rpc: {
       pullRequests: ({ keys }) =>
         Object.fromEntries(keys.map((key) => [key, rows[key]!])),
-      markReady: unexpectedAction,
-      markDraft: unexpectedAction,
-      merge: unexpectedAction,
     },
   });
 }
@@ -150,7 +144,12 @@ describe("pull request row item", () => {
     });
     expect(badge.dataset.pullRequestBadge).toBe("open");
     expect(badge.dataset.pullRequestChecks).toBe("pending");
-    expect(view.inspection.rpcCalls).toHaveLength(1);
+    expect(view.inspection.rpcCalls).toMatchObject([
+      {
+        method: "pullRequests",
+        input: { keys: ["env_row"], maxAgeMs: PULL_REQUESTS_ANY_AGE_MS },
+      },
+    ]);
   });
 
   it.each<[string, EnvironmentPullRequest]>([

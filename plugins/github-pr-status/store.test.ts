@@ -353,3 +353,43 @@ describe("aligned refresh ticks", () => {
     },
   );
 });
+
+describe("reads with a maximum age", () => {
+  it("answers from saved data within the age and refreshes it in the background", async () => {
+    vi.useFakeTimers();
+    const { store, load, publish } = setup([available(pullRequest())]);
+    await store.read("a", { viewer: true });
+    const signal = new AbortController();
+    store.watch("a", signal.signal);
+    await vi.advanceTimersByTimeAsync(60 * 60_000);
+    load.mockClear();
+    let release!: () => void;
+    load.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          release = () => resolve(available(pullRequest({ title: "Renamed" })));
+        }),
+    );
+    const served = await store.read("a", {
+      viewer: true,
+      maxAgeMs: Number.MAX_SAFE_INTEGER,
+    });
+    expect(served).toMatchObject({ pullRequest: { title: "Watch the PR" } });
+    expect(load).toHaveBeenCalledTimes(1);
+    release();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(publish).toHaveBeenCalledWith(["a"]);
+    signal.abort();
+  });
+
+  it("waits for a fresh row when saved data is older than the age", async () => {
+    vi.useFakeTimers();
+    const { store, load } = setup([available(pullRequest())]);
+    await store.read("a", { viewer: true });
+    await vi.advanceTimersByTimeAsync(60_000);
+    load.mockResolvedValue(available(pullRequest({ title: "Renamed" })));
+    await expect(
+      store.read("a", { viewer: true, maxAgeMs: 30_000 }),
+    ).resolves.toMatchObject({ pullRequest: { title: "Renamed" } });
+  });
+});
