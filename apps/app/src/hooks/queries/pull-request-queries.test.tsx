@@ -12,8 +12,14 @@ import {
 } from "./pull-request-queries";
 
 const keyedQuery = vi.hoisted(() => ({
+  pluginEnabled: true,
   data: {} as Record<string, EnvironmentPullRequests>,
   refetch: vi.fn(async () => {}),
+}));
+
+vi.mock("@tanstack/react-query", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@tanstack/react-query")>()),
+  useQuery: () => ({ data: keyedQuery.pluginEnabled }),
 }));
 
 vi.mock("@/lib/plugin-sdk-hooks", () => ({
@@ -76,6 +82,7 @@ afterEach(() => {
   vi.useRealTimers();
   keyedQuery.refetch.mockClear();
   keyedQuery.data = {};
+  keyedQuery.pluginEnabled = true;
 });
 
 describe("isEnvironmentPullRequestStale", () => {
@@ -125,6 +132,16 @@ describe("useEnvironmentPullRequest refreshes", () => {
     vi.setSystemTime(Date.now() + 15_000);
     await showPage();
     expect(keyedQuery.refetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("hides a previously cached PR when its plugin is disabled", () => {
+    keyedQuery.data = { "env-disabled": row("open") };
+    keyedQuery.pluginEnabled = false;
+    const { result } = renderHook(() =>
+      useEnvironmentPullRequest("env-disabled"),
+    );
+    expect(result.current.pullRequest).toBeNull();
+    expect(result.current.isLoading).toBe(false);
   });
 
   it("keeps the banner absent when only previous branches have linked PRs", () => {
