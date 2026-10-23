@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { vi } from "vitest";
+import { z } from "zod";
 
 interface FakeGhResponse {
   stdout?: string;
@@ -24,7 +25,7 @@ export async function installFakeGh(
     `
 const fs = require("node:fs");
 const args = process.argv.slice(2);
-fs.appendFileSync(process.env.TEST_GH_LOG, args.join("\\t") + "\\n");
+fs.appendFileSync(process.env.TEST_GH_LOG, JSON.stringify(args) + "\\n");
 const responses = JSON.parse(process.env.TEST_GH_RESPONSES);
 const response = responses[args.slice(0, 2).join(" ")] ?? {};
 if (response.stdout) process.stdout.write(response.stdout);
@@ -43,6 +44,7 @@ process.exitCode = response.exit ?? 0;
       : `#!/bin/sh\nexec '${process.execPath.replaceAll("'", "'\\''")}' '${scriptPath.replaceAll("'", "'\\''")}' "$@"\n`,
     { mode: 0o755 },
   );
+  vi.stubEnv("GH_CONFIG_DIR", binPath);
   vi.stubEnv("TEST_GH_LOG", logPath);
   vi.stubEnv("TEST_GH_RESPONSES", JSON.stringify(responses));
   vi.stubEnv("PATH", `${binPath}${path.delimiter}${process.env.PATH ?? ""}`);
@@ -53,7 +55,7 @@ process.exitCode = response.exit ?? 0;
           .trim()
           .split("\n")
           .filter(Boolean)
-          .map((line) => line.split("\t"));
+          .map((line) => z.array(z.string()).parse(JSON.parse(line)));
       } catch (error) {
         if (
           error instanceof Error &&

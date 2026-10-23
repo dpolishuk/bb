@@ -32,7 +32,15 @@ describe("bb thread show command output", () => {
       urls.push(String(input));
       bodies.push(JSON.parse(String(init?.body)));
       return new Response(
-        JSON.stringify({ ok: true, result: { [environmentId]: row } }),
+        JSON.stringify({
+          ok: true,
+          result: {
+            [environmentId]:
+              row.outcome === "available"
+                ? { outcome: "available", pullRequests: [row.pullRequest] }
+                : row,
+          },
+        }),
         { status: 200, headers: { "Content-Type": "application/json" } },
       );
     });
@@ -47,6 +55,7 @@ describe("bb thread show command output", () => {
       url: "https://github.com/example/bb/pull/42",
       baseRefName: "main",
       headRefName: "bb/thread-show-pr",
+      headRefOid: null,
       updatedAt: "2026-06-24T12:00:00.000Z",
       autoMerge: false,
       inMergeQueue: false,
@@ -357,7 +366,7 @@ describe("bb thread show command output", () => {
     await runCommand(["thread", "show", "thread-show-pr"], register);
 
     expect(rpc.urls).toEqual([
-      "http://server/api/v1/plugins/bb--github-pr-status/rpc/pullRequests",
+      "http://server/api/v1/plugins/bb--github-pr-status/rpc/experimental_pullRequests",
     ]);
     expect(rpc.bodies).toEqual([{ keys: ["env-show-pr"] }]);
     const output = collectLogLines(vi.mocked(console.log)).join("\n");

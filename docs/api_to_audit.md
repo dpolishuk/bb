@@ -14,6 +14,12 @@ question.
 [provider-bridge-protocol.md](provider-bridge-protocol.md). An entry without
 a "Docs:" line has no owning doc, so it keeps the essential contract itself.
 
+## GitHub PR Status experimental keyed read
+
+The bundled `bb--github-pr-status` plugin exposes `experimental_pullRequests` through the existing typed RPC APIs. Each environment key returns `available` with a `pullRequests` list (current branch first), `absent`, or `unavailable`. This replaces the plugin's one-PR `pullRequests` read. The composer, Info panel, retired sidebar shim and `bb thread show` use the same contract; `bb pull-request show` uses the same store. Only current-branch discovery exists. Linked PRs share persisted snapshots, loads and timers by URL.
+
+Docs: Plugin Guide HTTP/WebSocket/RPC card (`surfaces.ts`, `wire`). Before stabilization, settle ordering when the current branch has no PR, link retention and removal, multi-host credential visibility, pagination and cross-version plugin contract compatibility. This changes a bundled plugin's RPC contract, not an exported Plugin SDK member; no new SDK API or daemon wire field is added.
+
 ## Composer popups
 
 `ComposerCustomization.experimental_popups` registers `{ id, label, component }`

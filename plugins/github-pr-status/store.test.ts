@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { createFakePluginHost } from "@get-bb/plugin-sdk/testing";
+import { createPullRequestPersistence } from "./persistence.js";
 import type { EnvironmentPullRequest, PullRequest } from "./contract.js";
 import { createPullRequestStore } from "./store.js";
 
@@ -12,6 +14,7 @@ function pullRequest(overrides: Partial<PullRequest> = {}): PullRequest {
     url: "https://github.com/acme/bb/pull/42",
     baseRefName: "main",
     headRefName: "bb/pr-watch",
+    headRefOid: null,
     updatedAt: "2026-06-16T12:30:00Z",
     autoMerge: false,
     inMergeQueue: false,
@@ -44,236 +47,189 @@ const pending = pullRequest({
   attention: "checks_pending",
 });
 
-function available(pr: PullRequest): EnvironmentPullRequest {
-  return { outcome: "available", pullRequest: pr };
-}
+const owners: ReturnType<typeof createFakePluginHost>[] = [];
+const stores: ReturnType<typeof createPullRequestStore>[] = [];
 
-function createHarness(results: EnvironmentPullRequest[]) {
-  const load = vi.fn(async (_environmentId: string) => {
-    const next = results.length > 1 ? results.shift()! : results[0]!;
-    return next;
-  });
+function setup(
+  results: EnvironmentPullRequest[],
+  owner = createFakePluginHost({ pluginId: "bb--github-pr-status" }),
+) {
+  owners.push(owner);
+  const persistence = createPullRequestPersistence(owner.bb.storage);
+  const load = vi.fn(async (_id: string, _url: string | null) =>
+    results.length > 1 ? results.shift()! : results[0]!,
+  );
   const publish = vi.fn();
-  const store = createPullRequestStore({ load, publish });
-  return { load, publish, store };
+  const store = createPullRequestStore({
+    load,
+    publish,
+    persistence,
+    branch: () => "bb/pr-watch",
+    onCheckFailed: (id, error) => {
+      throw new Error(`${id}: ${error}`);
+    },
+  });
+  stores.push(store);
+  return { load, publish, store, persistence, owner };
+}
+function available(pullRequest: PullRequest): EnvironmentPullRequest {
+  return { outcome: "available", pullRequest };
+}
+function list(pullRequests: PullRequest[]) {
+  return { outcome: "available", pullRequests };
 }
 
-async function flush(): Promise<void> {
+async function flush() {
   await vi.advanceTimersByTimeAsync(0);
 }
 
-describe("pull request store", () => {
-  afterEach(() => {
-    vi.useRealTimers();
-  });
+afterEach(async () => {
+  for (const store of stores.splice(0)) store.dispose();
+  for (const owner of new Set(owners.splice(0))) await owner.harness.dispose();
+  vi.useRealTimers();
+});
 
-  it("checks an active pull request only while watched and publishes only changes", async () => {
+describe("shared pull request refresh", () => {
+  it("uses one timer and load per PR, publishes changes to every link and stops when unwatched", async () => {
     vi.useFakeTimers();
-    const { load, publish, store } = createHarness([
-      available(pending),
-      available(pending),
-      available(pullRequest()),
-    ]);
-    await store.read("env-1", { viewer: true });
-    const controller = new AbortController();
-    store.watch("env-1", controller.signal);
-    await flush();
-    expect(load).toHaveBeenCalledTimes(1);
-
-    await vi.advanceTimersByTimeAsync(ACTIVE_CHECK_MS);
-    expect(load).toHaveBeenCalledTimes(2);
-    expect(publish).not.toHaveBeenCalled();
-
-    await vi.advanceTimersByTimeAsync(ACTIVE_CHECK_MS);
-    expect(load).toHaveBeenCalledTimes(3);
-    expect(publish).toHaveBeenCalledExactlyOnceWith(["env-1"]);
-
-    await vi.advanceTimersByTimeAsync(ACTIVE_CHECK_MS * 3);
-    expect(load).toHaveBeenCalledTimes(3);
-    controller.abort();
-  });
-
-  it("stops checking when the watch is aborted", async () => {
-    vi.useFakeTimers();
-    const { load, store } = createHarness([available(pending)]);
-    const controller = new AbortController();
-    store.watch("env-1", controller.signal);
-    await flush();
-    controller.abort();
-    await vi.advanceTimersByTimeAsync(ACTIVE_CHECK_MS * 3);
-    expect(load).toHaveBeenCalledTimes(1);
-    expect(store.isWatched("env-1")).toBe(false);
-  });
-
-  it("serves reads from a short cache and shares one in-flight load", async () => {
-    vi.useFakeTimers();
-    const { load, store } = createHarness([available(pullRequest())]);
-    const [first, second] = await Promise.all([
-      store.read("env-1", { viewer: true }),
-      store.read("env-1", { viewer: true }),
-    ]);
-    expect(first).toEqual(second);
-    await store.read("env-1", { viewer: true });
-    expect(load).toHaveBeenCalledTimes(1);
-
-    await vi.advanceTimersByTimeAsync(10_000);
-    await store.read("env-1", { viewer: true });
-    expect(load).toHaveBeenCalledTimes(2);
-  });
-
-  it("makes the next read fresh after a refresh of an unwatched environment", async () => {
-    const { load, store } = createHarness([available(pullRequest())]);
-    await store.read("env-1", { viewer: true });
-    store.refresh("env-1");
-    await store.read("env-1", { viewer: true });
-    expect(load).toHaveBeenCalledTimes(2);
-  });
-
-  it("re-checks a watched environment on refresh and publishes the change", async () => {
-    vi.useFakeTimers();
-    const { publish, store } = createHarness([
-      available(pullRequest()),
-      { outcome: "absent" },
-    ]);
-    store.watch("env-1", new AbortController().signal);
-    await flush();
-    store.refresh("env-1");
-    await flush();
-    expect(publish).toHaveBeenCalledExactlyOnceWith(["env-1"]);
-    await expect(store.read("env-1", { viewer: true })).resolves.toEqual({
-      outcome: "absent",
-    });
-  });
-
-  it("publishes every watched environment that shares the refreshed pull request", async () => {
-    vi.useFakeTimers();
-    const results = new Map<string, EnvironmentPullRequest[]>([
-      ["env-1", [available(pullRequest())]],
-      ["env-2", [available(pullRequest()), available(pending)]],
-    ]);
-    const publish = vi.fn();
-    const store = createPullRequestStore({
-      load: async (environmentId) => {
-        const queue = results.get(environmentId)!;
-        return queue.length > 1 ? queue.shift()! : queue[0]!;
-      },
-      publish,
-    });
-    store.watch("env-1", new AbortController().signal);
-    store.watch("env-2", new AbortController().signal);
-    await flush();
-    store.refresh("env-2");
-    await flush();
-    expect(publish).toHaveBeenCalledExactlyOnceWith(["env-1", "env-2"]);
-    await expect(store.read("env-1", { viewer: true })).resolves.toEqual(
-      available(pending),
+    const { store, load, publish } = setup([available(pending)]);
+    for (const id of ["a", "b", "c", "d", "e"])
+      await store.read(id, { viewer: true });
+    const signals = Array.from({ length: 5 }, () => new AbortController());
+    ["a", "b", "c", "d", "e"].forEach((id, index) =>
+      store.watch(id, signals[index]!.signal),
     );
+    await flush();
+    load.mockClear();
+    await vi.advanceTimersByTimeAsync(ACTIVE_CHECK_MS);
+    expect(load).toHaveBeenCalledTimes(1);
+    expect(publish).not.toHaveBeenCalled();
+    load.mockResolvedValue(available(pullRequest()));
+    await vi.advanceTimersByTimeAsync(ACTIVE_CHECK_MS);
+    expect(load).toHaveBeenCalledTimes(2);
+    expect(publish).toHaveBeenCalledExactlyOnceWith(["a", "b", "c", "d", "e"]);
+    for (const signal of signals) signal.abort();
+    await vi.advanceTimersByTimeAsync(ACTIVE_CHECK_MS * 3);
+    expect(load).toHaveBeenCalledTimes(2);
   });
 
-  it("does not publish a change the opening viewer's own read is fetching", async () => {
+  it("serves restored snapshots immediately, keeps the due time, and writes nothing for identical content", async () => {
     vi.useFakeTimers();
-    const { load, publish, store } = createHarness([
-      available(pending),
+    const first = setup([available(pending)]);
+    await first.store.read("a", { viewer: true });
+    const changes = first.owner.bb.storage
+      .database()
+      .prepare("SELECT total_changes() AS n")
+      .get();
+    await vi.advanceTimersByTimeAsync(10_000);
+    await first.store.read("a", { viewer: true });
+    expect(
+      first.owner.bb.storage
+        .database()
+        .prepare("SELECT total_changes() AS n")
+        .get(),
+    ).toEqual(changes);
+    first.store.dispose();
+    const restored = setup([available(pending)], first.owner);
+    let finish!: (value: EnvironmentPullRequest) => void;
+    restored.load.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    restored.store.watch("a", new AbortController().signal);
+    await expect(restored.store.read("a", { viewer: true })).resolves.toEqual(
+      list([pending]),
+    );
+    await flush();
+    expect(restored.load).toHaveBeenCalledTimes(1);
+    finish(available({ ...pending, title: "Updated" }));
+    await flush();
+    expect(restored.publish).toHaveBeenCalledExactlyOnceWith(["a"]);
+    await vi.advanceTimersByTimeAsync(ACTIVE_CHECK_MS - 1);
+    expect(restored.load).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(restored.load).toHaveBeenCalledTimes(2);
+  });
+
+  it("retains branch discoveries as ordered links and deletes orphan snapshots with the last environment", async () => {
+    vi.useFakeTimers();
+    const next = pullRequest({
+      number: 43,
+      url: "https://github.com/acme/bb/pull/43",
+      headRefName: "next",
+    });
+    const { store, persistence } = setup([
+      available(pullRequest()),
+      available(next),
+    ]);
+    await store.read("a", { viewer: true });
+    store.refresh("a", true);
+    await expect(store.read("a", { viewer: true })).resolves.toEqual(
+      list([next, pullRequest()]),
+    );
+    expect(persistence.links()).toHaveLength(2);
+    store.remove("a");
+    expect(persistence.links()).toEqual([]);
+    expect(persistence.snapshots()).toEqual([]);
+  });
+
+  it("persists absence and rediscovers after an unwatched branch refresh", async () => {
+    const { store, persistence } = setup([
+      { outcome: "absent" },
       available(pullRequest()),
     ]);
-    await store.read("env-1", { viewer: true });
-    await vi.advanceTimersByTimeAsync(60_000);
+    await expect(store.read("a", { viewer: true })).resolves.toEqual({
+      outcome: "absent",
+    });
+    expect(persistence.links()).toMatchObject([
+      { environmentId: "a", url: null, current: true },
+    ]);
+    store.refresh("a", true);
+    await expect(store.read("a", { viewer: true })).resolves.toEqual(
+      list([pullRequest()]),
+    );
+    expect(persistence.links()).toHaveLength(1);
+  });
 
-    const controller = new AbortController();
-    store.watch("env-1", controller.signal);
-    const opened = store.read("env-1", { viewer: true });
+  it("rechecks a pushed PR once when GitHub initially returns its previous quiet head", async () => {
+    vi.useFakeTimers();
+    const { store, load, publish } = setup([available(pullRequest())]);
+    await store.read("a", { viewer: true });
+    store.watch("a", new AbortController().signal);
     await flush();
-
-    await expect(opened).resolves.toEqual(available(pullRequest()));
+    store.pushed("a");
+    await flush();
     expect(load).toHaveBeenCalledTimes(2);
     expect(publish).not.toHaveBeenCalled();
-    controller.abort();
-  });
-
-  it("publishes a change to a viewer that kept an older row while unwatched", async () => {
-    vi.useFakeTimers();
-    const { publish, store } = createHarness([
-      available(pending),
-      available(pullRequest()),
-    ]);
-    await store.read("env-1", { viewer: true });
-    await vi.advanceTimersByTimeAsync(60_000);
-
-    const controller = new AbortController();
-    store.watch("env-1", controller.signal);
-    await flush();
-
-    expect(publish).toHaveBeenCalledExactlyOnceWith(["env-1"]);
-    controller.abort();
-  });
-
-  it("resumes checking when a read finds checks pending again", async () => {
-    vi.useFakeTimers();
-    const { load, store } = createHarness([
-      available(pullRequest()),
-      available(pending),
-    ]);
-    store.watch("env-1", new AbortController().signal);
-    await flush();
-    await vi.advanceTimersByTimeAsync(ACTIVE_CHECK_MS * 2);
-    expect(load).toHaveBeenCalledTimes(1);
-
-    await store.read("env-1", { viewer: true });
-    expect(load).toHaveBeenCalledTimes(2);
+    load.mockResolvedValue(available(pending));
     await vi.advanceTimersByTimeAsync(ACTIVE_CHECK_MS);
     expect(load).toHaveBeenCalledTimes(3);
+    expect(publish).toHaveBeenCalledExactlyOnceWith(["a"]);
   });
 
-  it("rechecks a watched environment through the short cache", async () => {
+  it("fetches again after an action that completed during an in-flight poll", async () => {
     vi.useFakeTimers();
-    const { load, store } = createHarness([available(pullRequest())]);
-    store.watch("env-1", new AbortController().signal);
+    const { store, load } = setup([available(pending)]);
+    await store.read("a", { viewer: true });
+    store.watch("a", new AbortController().signal);
     await flush();
-    store.recheck("env-1");
+    let finish!: (result: EnvironmentPullRequest) => void;
+    load.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    await vi.advanceTimersByTimeAsync(ACTIVE_CHECK_MS);
+    store.refresh("a");
+    load.mockResolvedValue(available(pullRequest({ state: "merged" })));
+    finish(available(pending));
     await flush();
-    expect(load).toHaveBeenCalledTimes(1);
-
-    await vi.advanceTimersByTimeAsync(10_000);
-    store.recheck("env-1");
-    await flush();
-    expect(load).toHaveBeenCalledTimes(2);
-  });
-
-  it("makes the next check fresh after an invalidation without loading", async () => {
-    vi.useFakeTimers();
-    const { load, store } = createHarness([available(pullRequest())]);
-    store.watch("env-1", new AbortController().signal);
-    await flush();
-    store.invalidate("env-1");
-    await flush();
-    expect(load).toHaveBeenCalledTimes(1);
-    store.recheck("env-1");
-    await flush();
-    expect(load).toHaveBeenCalledTimes(2);
-  });
-
-  it("does not let a load that started before a refresh overwrite newer data", async () => {
-    let resolveStale: (value: EnvironmentPullRequest) => void = () => {};
-    const load = vi
-      .fn<(environmentId: string) => Promise<EnvironmentPullRequest>>()
-      .mockImplementationOnce(
-        () =>
-          new Promise((resolve) => {
-            resolveStale = resolve;
-          }),
-      )
-      .mockResolvedValue({ outcome: "absent" });
-    const store = createPullRequestStore({ load, publish: vi.fn() });
-    const stale = store.read("env-1", { viewer: true });
-    store.refresh("env-1");
-    await expect(store.read("env-1", { viewer: true })).resolves.toEqual({
-      outcome: "absent",
-    });
-    resolveStale(available(pullRequest()));
-    await stale;
-    await expect(store.read("env-1", { viewer: true })).resolves.toEqual({
-      outcome: "absent",
-    });
-    expect(load).toHaveBeenCalledTimes(2);
+    await expect(store.read("a", { viewer: true })).resolves.toEqual(
+      list([pullRequest({ state: "merged" })]),
+    );
+    expect(load).toHaveBeenCalledTimes(3);
   });
 });

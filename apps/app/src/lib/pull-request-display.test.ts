@@ -16,6 +16,7 @@ function pullRequest(overrides: Partial<PullRequest> = {}): PullRequest {
     state: "open",
     baseRefName: "main",
     headRefName: "change",
+    headRefOid: null,
     updatedAt: "2026-09-25T12:00:00Z",
     autoMerge: false,
     inMergeQueue: false,

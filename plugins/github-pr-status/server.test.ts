@@ -50,6 +50,7 @@ function view(
     inMergeQueue: false,
     baseRefName: "main",
     headRefName: "bb/pr",
+    headRefOid: null,
     updatedAt: "2026-10-01T00:00:00Z",
     checks: [],
     reviewDecision: null,
@@ -85,9 +86,13 @@ async function setup(options: {
     experimental_callHostRpc:
       options.callHost ??
       ((call) =>
-        call.method === "view"
-          ? { outcome: "found", pullRequest: view() }
-          : { ok: true }),
+        call.method === "upstream"
+          ? { oid: null }
+          : call.method === "upstream"
+            ? { oid: null }
+            : call.method === "view"
+              ? { outcome: "found", pullRequest: view() }
+              : { ok: true }),
   });
   await plugin(fake.bb);
   return fake;
@@ -103,30 +108,40 @@ describe("GitHub PR Status server", () => {
       },
       callHost: (call) => {
         if (call.hostId === "host-2") throw new Error("Host is suspended");
+        if (call.method === "upstream") return { oid: null };
         return { outcome: "found", pullRequest: view() };
       },
     });
 
     await expect(
-      fake.harness.callRpc("pullRequests", {
+      fake.harness.callRpc("experimental_pullRequests", {
         keys: ["env-1", "env-plain", "env-asleep", "env-missing"],
       }),
     ).resolves.toEqual({
       "env-1": {
         outcome: "available",
-        pullRequest: expect.objectContaining({
-          number: 7,
-          state: "open",
-          attention: "none",
-        }),
+        pullRequests: [
+          expect.objectContaining({
+            number: 7,
+            state: "open",
+            attention: "none",
+          }),
+        ],
       },
       "env-plain": { outcome: "absent" },
       "env-asleep": { outcome: "unavailable", message: "Host is suspended" },
       "env-missing": { outcome: "absent" },
     });
-    expect(fake.harness.experimental_hostRpcCalls).toMatchObject([
-      { method: "view", input: { path: "/work/env-1" }, hostId: "host-1" },
-      { method: "view", hostId: "host-2" },
+    expect(
+      fake.harness.experimental_hostRpcCalls.filter(
+        (call) => call.method === "view",
+      ),
+    ).toMatchObject([
+      {
+        method: "view",
+        input: { path: "/work/env-1", url: null, refresh: false },
+        hostId: "host-1",
+      },
     ]);
   });
 
@@ -190,9 +205,13 @@ describe("GitHub PR Status server", () => {
   it("returns the gh failure as a refusal and the CLI prints it", async () => {
     const fake = await setup({
       callHost: (call) =>
-        call.method === "view"
-          ? { outcome: "found", pullRequest: view({ isDraft: true }) }
-          : { ok: false, message: "gh pr ready failed: HTTP 403" },
+        call.method === "upstream"
+          ? { oid: null }
+          : call.method === "upstream"
+            ? { oid: null }
+            : call.method === "view"
+              ? { outcome: "found", pullRequest: view({ isDraft: true }) }
+              : { ok: false, message: "gh pr ready failed: HTTP 403" },
     });
 
     await expect(

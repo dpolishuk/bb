@@ -529,6 +529,7 @@ function buildPullRequestFixture(
     url: "https://github.com/acme/bb/pull/128",
     baseRefName: "main",
     headRefName: "bb/pr-context-banner",
+    headRefOid: null,
     updatedAt: "2026-06-16T12:30:00Z",
     autoMerge: false,
     inMergeQueue: false,

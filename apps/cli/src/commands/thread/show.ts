@@ -15,7 +15,7 @@ import {
 } from "@bb/domain";
 import { BbHttpError, type BbSdk } from "@bb/sdk";
 import {
-  environmentPullRequestSchema,
+  environmentPullRequestsSchema,
   GITHUB_PR_STATUS_PLUGIN_ID,
   type PullRequest,
 } from "bb-plugin-bb--github-pr-status/contract";
@@ -152,15 +152,15 @@ async function fetchPullRequest(args: {
   try {
     const rows = await args.sdk.plugins.callRpc({
       pluginId: GITHUB_PR_STATUS_PLUGIN_ID,
-      method: "pullRequests",
+      method: "experimental_pullRequests",
       input: { keys: [args.environmentId] },
-      outputSchema: z.record(z.string(), environmentPullRequestSchema),
+      outputSchema: z.record(z.string(), environmentPullRequestsSchema),
     });
     const response = rows[args.environmentId] ?? { outcome: "absent" };
     if (response.outcome === "available") {
       return {
         status: "available",
-        pullRequest: response.pullRequest,
+        pullRequest: response.pullRequests[0]!,
       };
     }
     if (response.outcome === "unavailable") {

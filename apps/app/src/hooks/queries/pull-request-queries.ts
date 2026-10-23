@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 import {
   GITHUB_PR_STATUS_PLUGIN_ID,
   githubPrStatusRpcContract,
-  type EnvironmentPullRequest,
+  type EnvironmentPullRequests,
   type PullRequest,
 } from "bb-plugin-bb--github-pr-status/contract";
 import {
@@ -14,13 +14,14 @@ const OPEN_PULL_REQUEST_STALE_MS = 30_000;
 const SETTLED_PULL_REQUEST_STALE_MS = 60 * 60_000;
 
 export function isEnvironmentPullRequestStale(
-  row: EnvironmentPullRequest,
+  row: EnvironmentPullRequests,
   loadedAt: number,
   now: number,
 ): boolean {
   const settled =
     row.outcome === "available" &&
-    (row.pullRequest.state === "merged" || row.pullRequest.state === "closed");
+    (row.pullRequests[0]?.state === "merged" ||
+      row.pullRequests[0]?.state === "closed");
   return (
     now - loadedAt >
     (settled ? SETTLED_PULL_REQUEST_STALE_MS : OPEN_PULL_REQUEST_STALE_MS)
@@ -58,7 +59,7 @@ export function useEnvironmentPullRequest(
   const query = useRpcKeyedQuery({
     pluginId: GITHUB_PR_STATUS_PLUGIN_ID,
     contract: githubPrStatusRpcContract,
-    method: "pullRequests",
+    method: "experimental_pullRequests",
     keys: enabled && environmentId ? [environmentId] : [],
     enabled,
   });
@@ -108,7 +109,8 @@ export function useEnvironmentPullRequest(
 
   return {
     isLoading: enabled && query.error === null && row === undefined,
-    pullRequest: row?.outcome === "available" ? row.pullRequest : null,
+    pullRequest:
+      row?.outcome === "available" ? (row.pullRequests[0] ?? null) : null,
   };
 }
 

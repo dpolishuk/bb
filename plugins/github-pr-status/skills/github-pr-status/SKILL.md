@@ -18,7 +18,7 @@ bb pull-request merge <environment-id> [--method merge|squash|rebase] [--json]
 ```
 
 - `show` prints the PR number, state, branch, attention, checks, review and
-  mergeability. `--json` prints `{ "outcome": "available", "pullRequest" }`,
+  mergeability. `--json` prints `{ "outcome": "available", "pullRequests": [...] }`,
   `{ "outcome": "absent" }` or `{ "outcome": "unavailable", "message" }`.
 - `ready` needs a draft PR, `draft` needs an open PR and `merge` needs an open
   PR GitHub reports as mergeable. Each re-reads the PR first and fails with
@@ -28,22 +28,19 @@ bb pull-request merge <environment-id> [--method merge|squash|rebase] [--json]
   with a message naming the machine.
 - `gh` must be installed and logged in on that machine.
 
-Other plugins read the same data through RPC. `pullRequests` is a keyed read:
-pass up to 200 environment ids and get one row per id. While a client watches
+Other plugins read the same data through RPC. `experimental_pullRequests` is a keyed read:
+pass up to 200 environment ids and get one row per id. Available rows contain a `pullRequests` list, current-branch PR first; previously discovered branch PRs stay linked. Core displays the first entry. While a client watches
 a row, the plugin re-checks it every 30 seconds when checks are pending,
-auto-merge is on, the PR is queued or mergeability is unknown. It also
-re-checks after a thread on the environment goes idle or the environment's
-refs, status or metadata change, and refreshes viewers only when the row
-changes.
+auto-merge is on, the PR is queued or mergeability is unknown. It also rechecks after a turn that ran `gh`, or discovers a PR after a turn on a branch without one. Environment status and branch changes refresh; ref changes read the local upstream OID and fetch only when it changes. Quiet/settled PRs do not poll. Saved snapshots render immediately after restart; overdue reads refresh in the background. Environments sharing a PR share its fetch and timer, and viewers refresh only when the row changes.
 
 ```ts
 experimental_useRpcKeyedQuery({
   pluginId: "bb--github-pr-status",
   contract,
-  method: "pullRequests",
+  method: "experimental_pullRequests",
   keys: [environmentId],
 });
 ```
 
 `bb plugin rpc inspect bb--github-pr-status` prints the input and output schemas
-for `pullRequests`, `markReady`, `markDraft` and `merge`.
+for `experimental_pullRequests`, `markReady`, `markDraft` and `merge`.

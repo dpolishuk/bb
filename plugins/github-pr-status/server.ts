@@ -11,9 +11,11 @@ import {
   githubPrStatusHostContract,
   githubPrStatusRpcContract,
   type EnvironmentPullRequest,
+  type EnvironmentPullRequests,
   type HostPullRequestAction,
   type PullRequest,
 } from "./contract.js";
+import { createPullRequestPersistence } from "./persistence.js";
 import { createPullRequestStore } from "./store.js";
 
 const JSON_OPTION = {
@@ -104,11 +106,11 @@ function describePullRequest(pr: PullRequest): string {
 }
 
 function describeEnvironmentPullRequest(
-  result: EnvironmentPullRequest,
+  result: EnvironmentPullRequests,
 ): string {
   switch (result.outcome) {
     case "available":
-      return describePullRequest(result.pullRequest);
+      return result.pullRequests.map(describePullRequest).join("\n\n");
     case "absent":
       return "No pull request found";
     case "unavailable":
@@ -132,9 +134,38 @@ export default function githubPrStatusPlugin(bb: BbPluginApi): void {
     }
   }
 
-  const lookedUpBranches = new Map<string, string | null>();
+  const persistence = createPullRequestPersistence(bb.storage);
+  const lookedUpBranches = new Map<string, string | null>(
+    persistence
+      .currentLinks()
+      .map((link) => [link.environment_id, link.branch]),
+  );
+  const upstreams = new Map<string, string | null>();
 
-  async function refreshIfBranchChanged(environmentId: string): Promise<void> {
+  async function checkUpstream(environmentId: string): Promise<void> {
+    if (!store.hasPullRequest(environmentId)) return;
+    try {
+      const environment = await getEnvironment(environmentId);
+      if (environment?.status !== "ready" || environment.path === null) return;
+      const { oid } = await host.call(
+        "upstream",
+        { path: environment.path },
+        { hostId: environment.hostId },
+      );
+      const previous = upstreams.get(environmentId);
+      upstreams.set(environmentId, oid);
+      if (oid !== null && previous !== oid) store.pushed(environmentId);
+    } catch (error) {
+      bb.log.debug(
+        `Failed to inspect upstream for ${environmentId}: ${errorMessage(error)}`,
+      );
+    }
+  }
+
+  async function refreshIfBranchChanged(
+    environmentId: string,
+    refsChanged: boolean,
+  ): Promise<void> {
     if (!lookedUpBranches.has(environmentId)) return;
     try {
       const environment = await getEnvironment(environmentId);
@@ -142,8 +173,8 @@ export default function githubPrStatusPlugin(bb: BbPluginApi): void {
         (environment?.branchName ?? null) !==
         lookedUpBranches.get(environmentId)
       ) {
-        store.refresh(environmentId);
-      }
+        store.refresh(environmentId, true);
+      } else if (refsChanged) await checkUpstream(environmentId);
     } catch (error) {
       bb.log.debug(
         `Failed to read environment ${environmentId}: ${errorMessage(error)}`,
@@ -153,6 +184,8 @@ export default function githubPrStatusPlugin(bb: BbPluginApi): void {
 
   async function loadPullRequest(
     environmentId: string,
+    url: string | null,
+    refresh: boolean,
   ): Promise<EnvironmentPullRequest> {
     let environment: Environment | null;
     try {
@@ -160,7 +193,8 @@ export default function githubPrStatusPlugin(bb: BbPluginApi): void {
     } catch (error) {
       return { outcome: "unavailable", message: errorMessage(error) };
     }
-    lookedUpBranches.set(environmentId, environment?.branchName ?? null);
+    const branch = environment?.branchName ?? null;
+    lookedUpBranches.set(environmentId, branch);
     if (environment === null || !environment.isGitRepo) {
       return { outcome: "absent" };
     }
@@ -168,9 +202,17 @@ export default function githubPrStatusPlugin(bb: BbPluginApi): void {
       return { outcome: "unavailable", message: "Environment is not ready" };
     }
     try {
+      if (!upstreams.has(environmentId)) {
+        const upstream = await host.call(
+          "upstream",
+          { path: environment.path },
+          { hostId: environment.hostId },
+        );
+        upstreams.set(environmentId, upstream.oid);
+      }
       const lookup = await host.call(
         "view",
-        { path: environment.path },
+        { path: environment.path, url, refresh },
         { hostId: environment.hostId },
       );
       switch (lookup.outcome) {
@@ -190,6 +232,8 @@ export default function githubPrStatusPlugin(bb: BbPluginApi): void {
   }
 
   const store = createPullRequestStore({
+    persistence,
+    branch: (environmentId) => lookedUpBranches.get(environmentId) ?? null,
     load: loadPullRequest,
     publish: (environmentIds) => {
       bb.rpc.experimental_invalidate(
@@ -202,6 +246,27 @@ export default function githubPrStatusPlugin(bb: BbPluginApi): void {
       );
     },
   });
+
+  bb.onDispose(() => store.dispose());
+  bb.events.on("experimental_environment.removed", ({ removal }) => {
+    store.remove(removal.environmentId);
+    lookedUpBranches.delete(removal.environmentId);
+    upstreams.delete(removal.environmentId);
+  });
+
+  for (const environmentId of new Set(
+    persistence.links().map((link) => link.environmentId),
+  )) {
+    void getEnvironment(environmentId)
+      .then((environment) => {
+        if (environment === null) store.remove(environmentId);
+      })
+      .catch((error) =>
+        bb.log.debug(
+          `Failed to check saved environment ${environmentId}: ${errorMessage(error)}`,
+        ),
+      );
+  }
 
   let watchedCount = 0;
   let stopEnvironmentEvents: (() => void) | null = null;
@@ -218,12 +283,13 @@ export default function githubPrStatusPlugin(bb: BbPluginApi): void {
             store.refresh(environmentId);
             return;
           case "branch":
-            if (event.changes.includes("git-refs-changed"))
-              store.invalidate(environmentId);
-            void refreshIfBranchChanged(environmentId);
+            void refreshIfBranchChanged(
+              environmentId,
+              event.changes.includes("git-refs-changed"),
+            );
             return;
           case "invalidate":
-            store.invalidate(environmentId);
+            void checkUpstream(environmentId);
             return;
           case null:
             return;
@@ -265,7 +331,7 @@ export default function githubPrStatusPlugin(bb: BbPluginApi): void {
         `${machine.name} isn't available, so its pull request can't be changed. Start the machine and try again.`,
       );
     }
-    const result = await loadPullRequest(environmentId);
+    const result = await loadPullRequest(environmentId, null, true);
     if (result.outcome === "unavailable") refuse(result.message);
     if (result.outcome === "absent") refuse("No pull request found");
     return {
@@ -327,14 +393,48 @@ export default function githubPrStatusPlugin(bb: BbPluginApi): void {
     return { message: "Pull request merge started" };
   }
 
+  async function readEnvironmentPullRequests(
+    environmentId: string,
+    viewer: boolean,
+  ): Promise<EnvironmentPullRequests> {
+    try {
+      const environment = await getEnvironment(environmentId);
+      if (environment === null) {
+        store.remove(environmentId);
+        return { outcome: "absent" };
+      }
+      if (!environment.isGitRepo) return { outcome: "absent" };
+      if (environment.status !== "ready" || environment.path === null)
+        return { outcome: "unavailable", message: "Environment is not ready" };
+      const machine = await bb.sdk.hosts.get({ hostId: environment.hostId });
+      if (
+        machine.status !== "connected" ||
+        machine.lifecycle.phase !== "active"
+      )
+        return {
+          outcome: "unavailable",
+          message: `${machine.name} isn't available. Start the machine and try again.`,
+        };
+      if (
+        lookedUpBranches.has(environmentId) &&
+        lookedUpBranches.get(environmentId) !== environment.branchName
+      )
+        store.refresh(environmentId, true);
+      return store.read(environmentId, { viewer });
+    } catch (error) {
+      return { outcome: "unavailable", message: errorMessage(error) };
+    }
+  }
+
   bb.rpc.register(
     githubPrStatusRpcContract,
     {
-      async pullRequests({ keys }, context) {
+      async experimental_pullRequests({ keys }, context) {
         const viewer = context.experimental_caller.kind === "client";
         const results = await Promise.all(
           keys.map(
-            async (key) => [key, await store.read(key, { viewer })] as const,
+            async (key) =>
+              [key, await readEnvironmentPullRequests(key, viewer)] as const,
           ),
         );
         return Object.fromEntries(results);
@@ -350,16 +450,50 @@ export default function githubPrStatusPlugin(bb: BbPluginApi): void {
     },
   );
 
-  bb.rpc.experimental_whileWatched("pullRequests", (read, signal) => {
-    if (!("key" in read)) return;
-    store.watch(read.key, signal);
-    const release = retainEnvironmentEvents();
-    signal.addEventListener("abort", release, { once: true });
-  });
+  bb.rpc.experimental_whileWatched(
+    "experimental_pullRequests",
+    (read, signal) => {
+      if (!("key" in read)) return;
+      store.watch(read.key, signal);
+      const release = retainEnvironmentEvents();
+      signal.addEventListener("abort", release, { once: true });
+    },
+  );
 
+  async function turnRanGh(threadId: string): Promise<boolean> {
+    let beforeSeq: string | undefined;
+    for (;;) {
+      const events = await bb.sdk.threads.events.list({
+        threadId,
+        beforeSeq,
+        order: "desc",
+        limit: "100",
+        types: ["item/started", "item/completed", "client/turn/requested"],
+      });
+      if (events.length === 0) return false;
+      for (const event of events) {
+        if (event.type === "client/turn/requested") return false;
+        if (event.type !== "item/started" && event.type !== "item/completed")
+          continue;
+        const item = event.data.item;
+        const command =
+          item.type === "commandExecution"
+            ? item.command
+            : item.type === "toolCall"
+              ? JSON.stringify(item.arguments ?? {})
+              : "";
+        if (/(?:^|[\s;|&"'])gh\s/u.test(command)) return true;
+      }
+      beforeSeq = String(events[events.length - 1]!.seq);
+    }
+  }
   for (const event of ["thread.idle", "thread.failed"] as const) {
-    bb.events.on(event, ({ thread }) => {
-      if (thread.environmentId !== null) store.recheck(thread.environmentId);
+    bb.events.on(event, async ({ thread }) => {
+      const environmentId = thread.environmentId;
+      if (environmentId === null || !store.isWatched(environmentId)) return;
+      if (!store.hasPullRequest(environmentId))
+        store.refresh(environmentId, true);
+      else if (await turnRanGh(thread.id)) store.recheck(environmentId);
     });
   }
 
@@ -375,9 +509,9 @@ export default function githubPrStatusPlugin(bb: BbPluginApi): void {
           positionals: ENVIRONMENT_POSITIONAL,
           options: { json: JSON_OPTION },
           async run(input) {
-            const result = await store.read(
+            const result = await readEnvironmentPullRequests(
               input.positionals["environment-id"],
-              { viewer: false },
+              false,
             );
             return {
               exitCode: 0,

@@ -25,6 +25,7 @@ function pullRequestJson(): string {
     isDraft: false,
     baseRefName: "main",
     headRefName: upstreamBranch,
+    headRefOid: null,
     updatedAt: "2026-08-10T12:30:00Z",
     statusCheckRollup: [],
     reviewDecision: null,
@@ -86,7 +87,23 @@ async function createManagedBaseTrackedWorkspace(): Promise<string> {
   return workspacePath;
 }
 
-const found = { "pr view": { stdout: pullRequestJson() } };
+const found = {
+  "api graphql": {
+    stdout: JSON.stringify({
+      data: {
+        p0: {
+          pullRequests: {
+            nodes: ["fork-owner", "other-owner"].map((owner, index) => ({
+              ...JSON.parse(pullRequestJson()),
+              number: 1236 + index,
+              headRepositoryOwner: { login: owner },
+            })),
+          },
+        },
+      },
+    }),
+  },
+};
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -105,7 +122,11 @@ describe("pull request lookup for differently named upstream branches", () => {
       const gh = await installFakeGh(found);
 
       await expect(
-        harness.experimental_call("view", { path: workspacePath }),
+        harness.experimental_call("view", {
+          path: workspacePath,
+          url: null,
+          refresh: false,
+        }),
       ).resolves.toMatchObject({
         outcome: "found",
         pullRequest: { number: 1236 },
@@ -115,9 +136,9 @@ describe("pull request lookup for differently named upstream branches", () => {
         action: { operation: "ready" },
       });
 
-      const calls = (await gh.readCalls()).filter((call) => call[0] === "pr");
+      const calls = await gh.readCalls();
       expect(calls).toHaveLength(2);
-      expect(calls[0]?.slice(0, 3)).toEqual(["pr", "view", "--json"]);
+      expect(calls[0]?.join(" ")).toContain(`headRefName: "${localBranch}"`);
       expect(calls[1]).toEqual(["pr", "ready"]);
     },
   );
@@ -129,12 +150,16 @@ describe("pull request lookup for differently named upstream branches", () => {
     const gh = await installFakeGh(found);
 
     await expect(
-      harness.experimental_call("view", { path: workspacePath }),
+      harness.experimental_call("view", {
+        path: workspacePath,
+        url: null,
+        refresh: false,
+      }),
     ).resolves.toMatchObject({ outcome: "found" });
 
-    const calls = (await gh.readCalls()).filter((call) => call[0] === "pr");
+    const calls = await gh.readCalls();
     expect(calls).toHaveLength(1);
-    expect(calls[0]?.slice(0, 3)).toEqual(["pr", "view", "--json"]);
+    expect(calls[0]?.join(" ")).toContain(`headRefName: "${localBranch}"`);
   });
 
   it("qualifies the real tracked fork branch instead of the managed local branch", async () => {
@@ -142,20 +167,19 @@ describe("pull request lookup for differently named upstream branches", () => {
     const gh = await installFakeGh(found);
 
     await expect(
-      harness.experimental_call("view", { path: workspacePath }),
+      harness.experimental_call("view", {
+        path: workspacePath,
+        url: null,
+        refresh: false,
+      }),
     ).resolves.toMatchObject({
       outcome: "found",
       pullRequest: { number: 1236, headRefName: upstreamBranch },
     });
 
-    const calls = (await gh.readCalls()).filter((call) => call[0] === "pr");
+    const calls = await gh.readCalls();
     expect(calls).toHaveLength(1);
-    expect(calls[0]?.slice(0, 4)).toEqual([
-      "pr",
-      "view",
-      qualifiedUpstream,
-      "--json",
-    ]);
+    expect(calls[0]?.join(" ")).toContain(`headRefName: "${upstreamBranch}"`);
   });
 
   it("never passes an untrusted upstream URL to gh", async () => {
@@ -166,7 +190,11 @@ describe("pull request lookup for differently named upstream branches", () => {
     vi.stubEnv("GH_ENTERPRISE_TOKEN", "dummy-enterprise-token");
 
     await expect(
-      harness.experimental_call("view", { path: workspacePath }),
+      harness.experimental_call("view", {
+        path: workspacePath,
+        url: null,
+        refresh: false,
+      }),
     ).resolves.toEqual({
       outcome: "unavailable",
       message:
@@ -179,18 +207,29 @@ describe("pull request lookup for differently named upstream branches", () => {
     const workspacePath = await createTrackedForkWorkspace();
     const gh = await installFakeGh(found);
 
-    await harness.experimental_call("view", { path: workspacePath });
+    const first = await harness.experimental_call("view", {
+      path: workspacePath,
+      url: null,
+      refresh: false,
+    });
     await runGit(
       ["remote", "set-url", forkRemote, "git@github.com:other-owner/bb.git"],
       { cwd: workspacePath },
     );
-    await harness.experimental_call("view", { path: workspacePath });
-
-    const calls = (await gh.readCalls()).filter((call) => call[0] === "pr");
-    expect(calls.map((call) => call[2])).toEqual([
-      qualifiedUpstream,
-      `other-owner:${upstreamBranch}`,
-    ]);
+    const second = await harness.experimental_call("view", {
+      path: workspacePath,
+      url: null,
+      refresh: false,
+    });
+    expect(first).toMatchObject({
+      outcome: "found",
+      pullRequest: { number: 1236 },
+    });
+    expect(second).toMatchObject({
+      outcome: "found",
+      pullRequest: { number: 1237 },
+    });
+    expect(await gh.readCalls()).toHaveLength(2);
   });
 
   it("uses the qualified upstream target for ready, draft, and merge actions", async () => {
@@ -217,14 +256,19 @@ describe("pull request lookup for differently named upstream branches", () => {
   it("returns none when gh genuinely finds no PR for the qualified upstream", async () => {
     const workspacePath = await createTrackedForkWorkspace();
     await installFakeGh({
-      "pr view": {
-        stderr: `no pull requests found for branch "${qualifiedUpstream}"\n`,
-        exit: 1,
+      "api graphql": {
+        stdout: JSON.stringify({
+          data: { p0: { pullRequests: { nodes: [] } } },
+        }),
       },
     });
 
     await expect(
-      harness.experimental_call("view", { path: workspacePath }),
+      harness.experimental_call("view", {
+        path: workspacePath,
+        url: null,
+        refresh: false,
+      }),
     ).resolves.toEqual({ outcome: "none" });
   });
 
@@ -244,7 +288,11 @@ describe("pull request lookup for differently named upstream branches", () => {
     }
 
     await expect(
-      harness.experimental_call("view", { path: workspacePath }),
+      harness.experimental_call("view", {
+        path: workspacePath,
+        url: null,
+        refresh: false,
+      }),
     ).resolves.toEqual({
       outcome: "unavailable",
       message: "GitHub CLI is not available",
@@ -256,7 +304,11 @@ describe("workspace state", () => {
   it("reports a missing workspace path as unavailable", async () => {
     const missing = path.join(await makeTempDir("bb-pr-missing-"), "gone");
     await expect(
-      harness.experimental_call("view", { path: missing }),
+      harness.experimental_call("view", {
+        path: missing,
+        url: null,
+        refresh: false,
+      }),
     ).resolves.toEqual({
       outcome: "unavailable",
       message: `Workspace path no longer exists: ${missing}`,
@@ -278,7 +330,11 @@ describe("workspace state", () => {
       message: "Cannot update pull request from a detached workspace",
     });
     await expect(
-      harness.experimental_call("view", { path: workspacePath }),
+      harness.experimental_call("view", {
+        path: workspacePath,
+        url: null,
+        refresh: false,
+      }),
     ).resolves.toEqual({ outcome: "none" });
     expect(await gh.readCalls()).toEqual([]);
   });
