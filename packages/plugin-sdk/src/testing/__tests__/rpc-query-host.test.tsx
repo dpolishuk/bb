@@ -548,3 +548,47 @@ it("keeps a keyed hook's refetch stable while its keys change", async () => {
     client.clear();
   }
 });
+
+it("keeps cached rows on screen while a keyed hook is disabled and re-enables without a re-read", async () => {
+  const client = new QueryClient();
+  const reads: string[][] = [];
+  const host = {
+    pluginId: "demo",
+    queryClient: client,
+    subscribe: () => () => {},
+    call: async (_plugin: string, _method: string, input: unknown) => {
+      const { keys } = input as { keys: string[] };
+      reads.push(keys);
+      return Object.fromEntries(keys.map((key) => [key, 1]));
+    },
+  };
+  const contract = defineRpcContract({
+    rows: {
+      input: z.object({ keys: z.array(z.string()) }),
+      output: z.record(z.string(), z.number()),
+    },
+  });
+  const hooks = createRpcQueryHooks(() => host);
+  const probe = renderHook(
+    ({ enabled }) =>
+      hooks.experimental_useRpcKeyedQuery({
+        contract,
+        method: "rows",
+        keys: ["a"],
+        enabled,
+      }),
+    { initialProps: { enabled: true } },
+  );
+  try {
+    await waitFor(() => expect(probe.result.current.data).toEqual({ a: 1 }));
+    probe.rerender({ enabled: false });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(probe.result.current.data).toEqual({ a: 1 });
+    probe.rerender({ enabled: true });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(reads).toEqual([["a"]]);
+  } finally {
+    probe.unmount();
+    client.clear();
+  }
+});

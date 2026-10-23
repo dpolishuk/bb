@@ -278,9 +278,7 @@ export function createRpcQueryHooks(useHost: () => RpcQueryHost) {
     useSubscription(host, pluginId, enabled && keys.length > 0);
     const subscribe = useCallback(
       (listener: () => void) =>
-        enabled && keys.length > 0
-          ? current.subscribe(keys, listener)
-          : () => {},
+        current.subscribe(enabled ? keys : [], listener),
       [current, keys, enabled],
     );
     const getSnapshot = useCallback(
