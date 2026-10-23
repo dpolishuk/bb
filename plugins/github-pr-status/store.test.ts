@@ -164,7 +164,7 @@ describe("shared pull request refresh", () => {
       url: "https://github.com/acme/bb/pull/43",
       headRefName: "next",
     });
-    const { store, persistence } = setup([
+    const { store, persistence, publish } = setup([
       available(pullRequest()),
       available(next),
     ]);
@@ -174,7 +174,12 @@ describe("shared pull request refresh", () => {
       list([next, pullRequest()]),
     );
     expect(persistence.links()).toHaveLength(2);
+    store.watch("a", new AbortController().signal);
+    await flush();
+    publish.mockClear();
     store.remove("a");
+    store.remove("a");
+    expect(publish).toHaveBeenCalledExactlyOnceWith(["a"]);
     expect(persistence.links()).toEqual([]);
     expect(persistence.snapshots()).toEqual([]);
   });

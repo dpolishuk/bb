@@ -306,12 +306,18 @@ export function createPullRequestStore(options: {
         void read(environmentId, { viewer: false });
     },
     remove(environmentId: string) {
+      const previous = JSON.stringify(resultFor(environmentId));
       generations.set(environmentId, (generations.get(environmentId) ?? 0) + 1);
       lookups.delete(environmentId);
       links.delete(environmentId);
       restored.delete(environmentId);
       served.delete(environmentId);
       options.persistence.removeEnvironment(environmentId);
+      if (
+        watches.has(environmentId) &&
+        previous !== JSON.stringify(resultFor(environmentId))
+      )
+        options.publish([environmentId]);
       for (const url of snapshots.keys()) {
         if (![...links.values()].some((urls) => urls.has(url))) {
           snapshots.delete(url);
