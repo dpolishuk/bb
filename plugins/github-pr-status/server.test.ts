@@ -122,6 +122,67 @@ describe("GitHub PR Status server", () => {
     await next.harness.dispose();
   });
 
+  it.each([
+    ["stale snapshot shape", JSON.stringify({ number: 7 })],
+    ["malformed snapshot JSON", "{invalid"],
+  ])("discards %s on reload and refetches", async (_, content) => {
+    const fake = await setup({});
+    await fake.harness.callRpc("experimental_pullRequests", {
+      keys: ["env-1"],
+    });
+    fake.bb.storage
+      .database()
+      .prepare("UPDATE snapshots SET content = ?")
+      .run(content);
+
+    const next = await fake.harness.reload(plugin);
+    expect(
+      next.bb.storage.database().prepare("SELECT url FROM snapshots").all(),
+    ).toEqual([]);
+    await expect(
+      next.harness.callRpc("experimental_pullRequests", { keys: ["env-1"] }),
+    ).resolves.toMatchObject({
+      "env-1": {
+        outcome: "available",
+        pullRequests: [{ number: 7, title: "Ship it" }],
+      },
+    });
+    expect(
+      next.harness.experimental_hostRpcCalls.filter(
+        (call) => call.method === "view",
+      ),
+    ).toHaveLength(1);
+    await next.harness.dispose();
+  });
+
+  it("discards unsupported persisted discovery sources and rediscovers", async () => {
+    const fake = await setup({});
+    await fake.harness.callRpc("experimental_pullRequests", {
+      keys: ["env-1"],
+    });
+    fake.bb.storage
+      .database()
+      .prepare("UPDATE links SET source = ?")
+      .run("future-source");
+
+    const next = await fake.harness.reload(plugin);
+    expect(
+      next.bb.storage.database().prepare("SELECT source FROM links").all(),
+    ).toEqual([]);
+    expect(
+      next.bb.storage.database().prepare("SELECT url FROM snapshots").all(),
+    ).toEqual([]);
+    await expect(
+      next.harness.callRpc("experimental_pullRequests", { keys: ["env-1"] }),
+    ).resolves.toMatchObject({
+      "env-1": { outcome: "available", pullRequests: [{ number: 7 }] },
+    });
+    expect(
+      next.bb.storage.database().prepare("SELECT source FROM links").all(),
+    ).toEqual([{ source: "current-branch" }]);
+    await next.harness.dispose();
+  });
+
   it("reads every requested environment in one call", async () => {
     const fake = await setup({
       environments: {

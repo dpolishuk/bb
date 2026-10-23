@@ -4,16 +4,29 @@ import { pullRequestSchema, type PullRequest } from "./contract.js";
 
 const snapshotRow = z.object({
   url: z.string().url(),
-  content: z.string(),
+  content: z
+    .string()
+    .transform((value, ctx): unknown => {
+      try {
+        return JSON.parse(value);
+      } catch {
+        ctx.addIssue({ code: "custom", message: "Invalid snapshot JSON" });
+        return z.NEVER;
+      }
+    })
+    .pipe(pullRequestSchema),
   fetched_at: z.number(),
   last_changed_at: z.number(),
 });
 const linkRow = z.object({
   environment_id: z.string(),
   url: z.string().url().nullable(),
+  source: z.literal("current-branch"),
   branch: z.string().nullable(),
   discovered_at: z.number(),
-  current: z.number().transform((value) => value === 1),
+  current: z
+    .union([z.literal(0), z.literal(1)])
+    .transform((value) => value === 1),
 });
 
 export function createPullRequestPersistence(storage: BbPluginApi["storage"]) {
@@ -28,7 +41,7 @@ export function createPullRequestPersistence(storage: BbPluginApi["storage"]) {
     CREATE TABLE links (
       environment_id TEXT NOT NULL,
       url TEXT,
-      source TEXT NOT NULL CHECK (source = 'current-branch'),
+      source TEXT NOT NULL,
       branch TEXT,
       discovered_at INTEGER NOT NULL,
       current INTEGER NOT NULL CHECK (current IN (0, 1))
@@ -42,57 +55,62 @@ export function createPullRequestPersistence(storage: BbPluginApi["storage"]) {
         "DELETE FROM snapshots WHERE NOT EXISTS (SELECT 1 FROM links WHERE links.url = snapshots.url)",
       )
       .run();
+  function readRows<T>(
+    table: "snapshots" | "links",
+    schema: z.ZodType<T>,
+    where = "",
+  ): T[] {
+    const rows = db
+      .prepare(`SELECT rowid AS row_id, * FROM ${table} ${where}`)
+      .all();
+    const valid: T[] = [];
+    for (const raw of rows) {
+      const result = schema.safeParse(raw);
+      if (result.success) {
+        valid.push(result.data);
+      } else {
+        const identity = z.object({ row_id: z.number() }).safeParse(raw);
+        if (identity.success) {
+          db.transaction(() => {
+            if (table === "snapshots")
+              db.prepare(
+                "DELETE FROM links WHERE url = (SELECT url FROM snapshots WHERE rowid = ?)",
+              ).run(identity.data.row_id);
+            db.prepare(`DELETE FROM ${table} WHERE rowid = ?`).run(
+              identity.data.row_id,
+            );
+          })();
+        }
+      }
+    }
+    if (table === "links") prune();
+    return valid;
+  }
   prune();
   return {
     currentLinks() {
-      return db
-        .prepare("SELECT environment_id, branch FROM links WHERE current = 1")
-        .all()
-        .map((row) =>
-          z
-            .object({
-              environment_id: z.string(),
-              branch: z.string().nullable(),
-            })
-            .parse(row),
-        );
-    },
-    environmentIds() {
-      return db
-        .prepare("SELECT DISTINCT environment_id FROM links")
-        .all()
-        .map(
-          (row) =>
-            z.object({ environment_id: z.string() }).parse(row).environment_id,
-        );
+      return readRows("links", linkRow, "WHERE current = 1").map((row) => ({
+        environment_id: row.environment_id,
+        branch: row.branch,
+      }));
     },
     snapshots() {
-      return db
-        .prepare("SELECT * FROM snapshots")
-        .all()
-        .map((raw) => {
-          const row = snapshotRow.parse(raw);
-          return {
-            pullRequest: pullRequestSchema.parse(JSON.parse(row.content)),
-            fetchedAt: row.fetched_at,
-            lastChangedAt: row.last_changed_at,
-          };
-        });
+      return readRows("snapshots", snapshotRow).map((row) => ({
+        pullRequest: row.content,
+        fetchedAt: row.fetched_at,
+        lastChangedAt: row.last_changed_at,
+      }));
     },
     links() {
-      return db
-        .prepare("SELECT * FROM links ORDER BY discovered_at DESC")
-        .all()
-        .map((raw) => {
-          const row = linkRow.parse(raw);
-          return {
-            environmentId: row.environment_id,
-            url: row.url,
-            branch: row.branch,
-            discoveredAt: row.discovered_at,
-            current: row.current,
-          };
-        });
+      return readRows("links", linkRow, "ORDER BY discovered_at DESC").map(
+        (row) => ({
+          environmentId: row.environment_id,
+          url: row.url,
+          branch: row.branch,
+          discoveredAt: row.discovered_at,
+          current: row.current,
+        }),
+      );
     },
     saveSnapshot(
       pullRequest: PullRequest,
