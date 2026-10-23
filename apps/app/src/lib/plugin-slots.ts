@@ -23,6 +23,7 @@ import type {
   PluginSourceCodeRendererRegistration,
   PluginThreadHeaderActionRegistration,
   ExperimentalThreadInfoRowRegistration,
+  ExperimentalThreadRowItemRegistration,
   ExperimentalThreadInfoSectionRegistration,
   PluginThreadActionRegistration,
   ExperimentalPluginBrowserToolbarActionRegistration,
@@ -58,6 +59,7 @@ export interface PluginRegistrationSet {
   experimentalSidebarNavigations?: readonly CollectedSidebarNavigationRegistration[];
   threadHeaderActions?: readonly PluginThreadHeaderActionRegistration[];
   threadInfoRows?: readonly ExperimentalThreadInfoRowRegistration[];
+  threadRowItems?: readonly ExperimentalThreadRowItemRegistration[];
   threadInfoSections?: readonly ExperimentalThreadInfoSectionRegistration[];
   threadActions?: readonly PluginThreadActionRegistration<unknown>[];
   browserToolbarActions?: readonly ExperimentalPluginBrowserToolbarActionRegistration[];
@@ -126,6 +128,8 @@ interface PluginThreadHeaderActionSlot
   extends PluginThreadHeaderActionRegistration, PluginSlotBase {}
 export interface PluginThreadInfoRowSlot
   extends ExperimentalThreadInfoRowRegistration, PluginSlotBase {}
+export interface PluginThreadRowItemSlot
+  extends ExperimentalThreadRowItemRegistration, PluginSlotBase {}
 export interface PluginThreadInfoSectionSlot
   extends ExperimentalThreadInfoSectionRegistration, PluginSlotBase {}
 export interface PluginThreadActionSlot
@@ -173,6 +177,7 @@ export interface PluginSlotSnapshot {
   experimentalSidebarNavigations: readonly ExperimentalSidebarNavigationSlot[];
   threadHeaderActions: readonly PluginThreadHeaderActionSlot[];
   threadInfoRows: readonly PluginThreadInfoRowSlot[];
+  threadRowItems: readonly PluginThreadRowItemSlot[];
   threadInfoSections: readonly PluginThreadInfoSectionSlot[];
   threadActions: readonly PluginThreadActionSlot[];
   browserToolbarActions: readonly PluginBrowserToolbarActionSlot[];
@@ -206,6 +211,7 @@ export const EMPTY_PLUGIN_SLOT_SNAPSHOT: PluginSlotSnapshot = {
   experimentalSidebarNavigations: [],
   threadHeaderActions: [],
   threadInfoRows: [],
+  threadRowItems: [],
   threadInfoSections: [],
   threadActions: [],
   browserToolbarActions: [],
@@ -246,6 +252,7 @@ const SLOT_KINDS: readonly SlotKind[] = [
   "experimentalSidebarNavigations",
   "threadHeaderActions",
   "threadInfoRows",
+  "threadRowItems",
   "threadInfoSections",
   "threadActions",
   "browserToolbarActions",
@@ -334,6 +341,7 @@ function flattenRegistrations(
     experimentalSidebarNavigations: stamp(set.experimentalSidebarNavigations),
     threadHeaderActions: stamp(set.threadHeaderActions),
     threadInfoRows: stamp(set.threadInfoRows),
+    threadRowItems: stamp(set.threadRowItems),
     threadInfoSections: stamp(set.threadInfoSections),
     threadActions: stamp(set.threadActions),
     browserToolbarActions: stamp(set.browserToolbarActions),

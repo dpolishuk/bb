@@ -1,0 +1,121 @@
+import {
+  definePluginApp,
+  experimental_useRpcKeyedQuery,
+  type ExperimentalThreadRowItemProps,
+} from "@get-bb/plugin-sdk/app";
+import { Icon } from "@/components/ui/icon";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import { cn } from "@/lib/utils";
+import {
+  currentPullRequest,
+  githubPrStatusRpcContract,
+  type PullRequest,
+} from "./contract.js";
+import {
+  PULL_REQUEST_STATE_DISPLAY,
+  describePullRequestStatus,
+  getPullRequestGithubCheckStatus,
+  type GithubCheckStatus,
+} from "./display.js";
+
+const CHECK_DOT_CLASS: Record<GithubCheckStatus, string> = {
+  success: "bg-success",
+  failure: "bg-destructive",
+  pending: "bg-warning",
+};
+
+const CHECK_LABEL: Record<GithubCheckStatus, string> = {
+  success: "checks passing",
+  failure: "checks failing",
+  pending: "checks running",
+};
+
+function checkCounts(pullRequest: PullRequest): string | null {
+  const { totalCount, passedCount, failedCount, pendingCount } =
+    pullRequest.checks;
+  if (totalCount === 0) return null;
+  return [
+    `${passedCount} passed`,
+    failedCount > 0 ? `${failedCount} failed` : null,
+    pendingCount > 0 ? `${pendingCount} pending` : null,
+  ]
+    .filter((part) => part !== null)
+    .join(", ");
+}
+
+export function PullRequestBadge({
+  pullRequest,
+}: {
+  pullRequest: PullRequest;
+}) {
+  const state = PULL_REQUEST_STATE_DISPLAY[pullRequest.state];
+  const checks = getPullRequestGithubCheckStatus(pullRequest);
+  const counts = checks === null ? null : checkCounts(pullRequest);
+  const label = [
+    `Pull request #${pullRequest.number}`,
+    state.label.toLowerCase(),
+    checks === null ? null : CHECK_LABEL[checks],
+  ]
+    .filter((part) => part !== null)
+    .join(", ");
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span
+          role="img"
+          aria-label={label}
+          data-pull-request-badge={pullRequest.state}
+          data-pull-request-checks={checks ?? undefined}
+          className="relative flex size-4 shrink-0 items-center justify-center"
+        >
+          <Icon name={state.icon} className={cn("size-3.5", state.className)} />
+          {checks === null ? null : (
+            <span
+              aria-hidden
+              className={cn(
+                "absolute -bottom-px -right-px size-1.5 rounded-full ring-1 ring-sidebar",
+                CHECK_DOT_CLASS[checks],
+                checks === "pending" && "animate-pulse",
+              )}
+            />
+          )}
+        </span>
+      </TooltipTrigger>
+      <TooltipContent side="top" className="max-w-72">
+        <div className="truncate">
+          #{pullRequest.number} {pullRequest.title}
+        </div>
+        <div className="text-muted-foreground">
+          {describePullRequestStatus(pullRequest)}
+          {counts === null ? null : ` · ${counts}`}
+        </div>
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
+function PullRequestRowItem({ thread, isLive }: ExperimentalThreadRowItemProps) {
+  const environmentId = thread.environment?.id ?? null;
+  const query = experimental_useRpcKeyedQuery({
+    contract: githubPrStatusRpcContract,
+    method: "experimental_pullRequests",
+    keys: environmentId === null ? [] : [environmentId],
+    enabled: isLive && environmentId !== null,
+  });
+  const row = environmentId === null ? undefined : query.data?.[environmentId];
+  const pullRequest = row === undefined ? null : currentPullRequest(row);
+  return pullRequest === null ? null : (
+    <PullRequestBadge pullRequest={pullRequest} />
+  );
+}
+
+export default definePluginApp((app) => {
+  app.slots.experimental_threadRowItem({
+    id: "pull-request",
+    component: PullRequestRowItem,
+  });
+});

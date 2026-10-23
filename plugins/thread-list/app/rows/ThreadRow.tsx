@@ -41,6 +41,7 @@ import {
   experimental_ThreadActionsContextMenu as ThreadActionsContextMenu,
   experimental_ThreadActionsMenu as ThreadActionsMenu,
   experimental_ThreadStatusGlyph as ThreadStatusGlyph,
+  experimental_ThreadRowItems as ThreadRowItems,
   experimental_THREAD_ACTION_GROUPS,
   experimental_useThreadActions,
   experimental_useSidebarThreadSplit,
@@ -583,6 +584,16 @@ function ThreadRowComponent({
     },
     [],
   );
+  const handleRowItemClick = useCallback<MouseEventHandler<HTMLSpanElement>>(
+    (event) => {
+      if (event.target instanceof Element && event.target.closest("a, button"))
+        return;
+      event.preventDefault();
+      event.stopPropagation();
+      rowLinkRef.current?.click();
+    },
+    [],
+  );
   const handleActionsMenuCloseAutoFocus = (event: Event) => {
     const begin = pendingMenuCustomize.current;
     if (begin) {
@@ -730,6 +741,11 @@ function ThreadRowComponent({
             revealOnHover={!isParentCollapsed}
           />
         ) : null}
+        {isEditing || isCustomizingActions ? null : (
+          <span className="contents" onClick={handleRowItemClick}>
+            <ThreadRowItems thread={thread} />
+          </span>
+        )}
       </span>
       {rowDragBindings && !rowDragBindings.disabled && !isActionsOpen ? (
         <SidebarThreadDragChip

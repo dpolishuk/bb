@@ -63,7 +63,7 @@ import {
   isPullRequestAutoMergeOn,
   getPullRequestGithubCheckStatus,
   PULL_REQUEST_STATE_DISPLAY,
-} from "@/lib/pull-request-display";
+} from "bb-plugin-bb--github-pr-status/display";
 import { PullRequestNextStepLabel } from "@/components/pull-request/PullRequestNextStepLabel";
 import { PullRequestStatusPill } from "@/components/pull-request/PullRequestStatusPill";
 import {

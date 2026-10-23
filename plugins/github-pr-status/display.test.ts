@@ -1,4 +1,4 @@
-import type { PullRequest } from "bb-plugin-bb--github-pr-status/contract";
+import type { PullRequest } from "./contract.js";
 import { describe, expect, it } from "vitest";
 import {
   getPullRequestGithubCheckStatus,
@@ -6,7 +6,7 @@ import {
   getPullRequestNextStep,
   getPullRequestStateDisplay,
   isPullRequestAutoMergeOn,
-} from "./pull-request-display";
+} from "./display.js";
 
 function pullRequest(overrides: Partial<PullRequest> = {}): PullRequest {
   return {

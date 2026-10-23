@@ -5,7 +5,7 @@ import {
   describePullRequestStatus,
   getPullRequestStateDisplay,
   getPullRequestGithubCheckStatus,
-} from "@/lib/pull-request-display";
+} from "bb-plugin-bb--github-pr-status/display";
 import { GithubFaviconIcon } from "./GithubFaviconIcon";
 
 const CHECKED_PULL_REQUEST_STATUS_MIN_WIDTH_CLASS = "min-w-9";

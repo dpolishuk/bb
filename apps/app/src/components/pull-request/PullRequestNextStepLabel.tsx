@@ -3,7 +3,7 @@ import { cn } from "@bb/shared-ui/lib/utils";
 import {
   PULL_REQUEST_NEXT_STEP_TONE_CLASS,
   type PullRequestNextStep,
-} from "@/lib/pull-request-display";
+} from "bb-plugin-bb--github-pr-status/display";
 
 export function PullRequestNextStepLabel({
   nextStep,

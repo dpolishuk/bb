@@ -404,10 +404,12 @@ it("watches each keyed row once while held, releasing only keys that leave", asy
   const client = new QueryClient();
   const active = new Map<string, number>();
   const watch = vi.fn(
-    (_plugin: string, _method: string, read: { key?: string }) => {
-      const key = read.key ?? "";
+    (_plugin: string, _method: string, read: { key: string } | object) => {
+      const key = "key" in read ? read.key : "";
       active.set(key, (active.get(key) ?? 0) + 1);
-      return () => active.set(key, (active.get(key) ?? 0) - 1);
+      return () => {
+        active.set(key, (active.get(key) ?? 0) - 1);
+      };
     },
   );
   const host = {
@@ -436,7 +438,9 @@ it("watches each keyed row once while held, releasing only keys that leave", asy
     await waitFor(() => expect(watch).toHaveBeenCalledTimes(3));
     probe.rerender({ keys: ["b", "c", "d"] });
     probe.rerender({ keys: ["c", "d", "e"] });
-    expect(watch.mock.calls.map(([, , read]) => read.key)).toEqual([
+    expect(
+      watch.mock.calls.map(([, , read]) => ("key" in read ? read.key : null)),
+    ).toEqual([
       "a",
       "b",
       "c",

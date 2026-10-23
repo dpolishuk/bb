@@ -96,7 +96,7 @@ import {
   getPullRequestNextStep,
   getPullRequestStateDisplay,
   isPullRequestAutoMergeOn,
-} from "@/lib/pull-request-display";
+} from "bb-plugin-bb--github-pr-status/display";
 import { PullRequestNextStepLabel } from "@/components/pull-request/PullRequestNextStepLabel";
 import { PullRequestStateIcon } from "@/components/pull-request/PullRequestStatusPill";
 import { GithubFaviconIcon } from "@/components/pull-request/GithubFaviconIcon";

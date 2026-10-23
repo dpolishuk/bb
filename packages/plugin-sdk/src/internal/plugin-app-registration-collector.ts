@@ -32,6 +32,7 @@ import type {
   PluginSourceCodeRendererRegistration,
   PluginThreadHeaderActionRegistration,
   ExperimentalThreadInfoRowRegistration,
+  ExperimentalThreadRowItemRegistration,
   ExperimentalThreadInfoSectionRegistration,
   PluginThreadActionRegistration,
   ExperimentalPluginBrowserToolbarActionRegistration,
@@ -303,6 +304,7 @@ export interface CollectedPluginAppRegistrations {
   experimentalSidebarNavigations: CollectedSidebarNavigationRegistration[];
   threadHeaderActions: PluginThreadHeaderActionRegistration[];
   threadInfoRows: ExperimentalThreadInfoRowRegistration[];
+  threadRowItems: ExperimentalThreadRowItemRegistration[];
   threadInfoSections: ExperimentalThreadInfoSectionRegistration[];
   threadActions: PluginThreadActionRegistration<unknown>[];
   browserToolbarActions: ExperimentalPluginBrowserToolbarActionRegistration[];
@@ -441,6 +443,7 @@ export function collectPluginAppRegistrations(
     experimentalSidebarNavigations: [],
     threadHeaderActions: [],
     threadInfoRows: [],
+    threadRowItems: [],
     threadInfoSections: [],
     threadActions: [],
     browserToolbarActions: [],
@@ -476,6 +479,7 @@ export function collectPluginAppRegistrations(
     sidebarHeader: new Set<string>(),
     threadHeaderAction: new Set<string>(),
     threadInfoRow: new Set<string>(),
+    threadRowItem: new Set<string>(),
     threadInfoSection: new Set<string>(),
     threadAction: new Set<string>(),
     browserToolbarAction: new Set<string>(),
@@ -890,6 +894,16 @@ export function collectPluginAppRegistrations(
         collected.threadHeaderActions.push({
           id,
           title: requireNonEmptyString(kind, "title", registration.title),
+          component: requireComponent(kind, registration.component),
+        });
+      },
+      experimental_threadRowItem(registration) {
+        const kind = "slots.experimental_threadRowItem";
+        const id = requireSlotId(kind, registration?.id);
+        requireUniqueId(kind, seenIds.threadRowItem, id);
+        collected.threadRowItems.push({
+          id,
+          ...requireOptionalOrder(kind, registration.order),
           component: requireComponent(kind, registration.component),
         });
       },
