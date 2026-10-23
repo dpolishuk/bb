@@ -186,8 +186,8 @@ export function assemblePullRequest(raw: GitHubPullRequestView): PullRequest {
   return {
     number: raw.number,
     title: raw.title,
-    url: raw.url,
     state,
+    url: raw.url,
     baseRefName: raw.baseRefName,
     headRefName: raw.headRefName,
     headRefOid: raw.headRefOid,

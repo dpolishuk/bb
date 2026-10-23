@@ -76,7 +76,11 @@ function available(pullRequest: PullRequest): EnvironmentPullRequest {
   return { outcome: "available", pullRequest };
 }
 function list(pullRequests: PullRequest[]) {
-  return { outcome: "available", pullRequests };
+  return {
+    outcome: "available",
+    pullRequests,
+    currentBranchUrl: pullRequests[0]?.url ?? null,
+  };
 }
 
 async function flush() {

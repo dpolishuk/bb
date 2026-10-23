@@ -469,13 +469,18 @@ const environmentPullRequestsSchema = z.record(
   z.discriminatedUnion("outcome", [
     z.object({
       outcome: z.literal("available"),
-      pullRequest: z.object({
-        url: z.string().url(),
-        number: z.number().int().positive(),
-        title: z.string(),
-        state: z.enum(["open", "draft", "merged", "closed"]),
-        updatedAt: z.string(),
-      }),
+      currentBranchUrl: z.string().nullable(),
+      pullRequests: z
+        .array(
+          z.object({
+            url: z.string().url(),
+            number: z.number().int().positive(),
+            title: z.string(),
+            state: z.enum(["open", "draft", "merged", "closed"]),
+            updatedAt: z.string(),
+          }),
+        )
+        .min(1),
     }),
     z.object({ outcome: z.literal("absent") }),
     z.object({ outcome: z.literal("unavailable"), message: z.string() }),
@@ -502,7 +507,7 @@ async function readEnvironmentPullRequests(
         rows,
         await bb.sdk.plugins.callRpc({
           pluginId: GITHUB_PR_STATUS_PLUGIN_ID,
-          method: "pullRequests",
+          method: "experimental_pullRequests",
           input: { keys },
           outputSchema: environmentPullRequestsSchema,
         }),
@@ -549,8 +554,9 @@ async function listTaskPullRequests(
       for (const threadId of threadIds) unavailable.add(threadId);
       continue;
     }
-    if (result.outcome === "absent") continue;
-    const { pullRequest } = result;
+    if (result.outcome === "absent" || result.currentBranchUrl === null)
+      continue;
+    const pullRequest = result.pullRequests[0]!;
     const existing = byUrl.get(pullRequest.url);
     if (!existing) {
       byUrl.set(pullRequest.url, { ...pullRequest, threadIds: [...threadIds] });

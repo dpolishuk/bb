@@ -158,7 +158,7 @@ describe("NotificationHub", () => {
     const pullRequest = {
       kind: "plugin-read",
       pluginId: "bb--github-pr-status",
-      method: "pullRequests",
+      method: "experimental_pullRequests",
       read: { key: "environment-1" },
     } as const;
     const changes: unknown[] = [];

@@ -30,6 +30,7 @@ vi.mock("@/lib/plugin-sdk-hooks", () => ({
 function row(state: PullRequest["state"]): EnvironmentPullRequests {
   return {
     outcome: "available",
+    currentBranchUrl: "https://github.com/acme/bb/pull/7",
     pullRequests: [
       {
         number: 7,
@@ -124,6 +125,19 @@ describe("useEnvironmentPullRequest refreshes", () => {
     vi.setSystemTime(Date.now() + 15_000);
     await showPage();
     expect(keyedQuery.refetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps the banner absent when only previous branches have linked PRs", () => {
+    const previous = row("open");
+    if (previous.outcome !== "available")
+      throw new Error("Expected PR fixture");
+    previous.currentBranchUrl = null;
+    keyedQuery.data = { "env-previous": previous };
+    const { result } = renderHook(() =>
+      useEnvironmentPullRequest("env-previous"),
+    );
+    expect(result.current.pullRequest).toBeNull();
+    expect(result.current.isLoading).toBe(false);
   });
 
   it("keeps a merged row for an hour before a visible page refetches it", async () => {

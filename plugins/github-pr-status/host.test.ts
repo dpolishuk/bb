@@ -138,7 +138,9 @@ describe("pull request lookup for differently named upstream branches", () => {
 
       const calls = await gh.readCalls();
       expect(calls).toHaveLength(2);
-      expect(calls[0]?.join(" ")).toContain(`headRefName: "${localBranch}"`);
+      expect((await gh.readQueries())[0]).toContain(
+        `headRefName: "${localBranch}"`,
+      );
       expect(calls[1]).toEqual(["pr", "ready"]);
     },
   );
@@ -159,7 +161,9 @@ describe("pull request lookup for differently named upstream branches", () => {
 
     const calls = await gh.readCalls();
     expect(calls).toHaveLength(1);
-    expect(calls[0]?.join(" ")).toContain(`headRefName: "${localBranch}"`);
+    expect((await gh.readQueries())[0]).toContain(
+      `headRefName: "${localBranch}"`,
+    );
   });
 
   it("qualifies the real tracked fork branch instead of the managed local branch", async () => {
@@ -179,7 +183,9 @@ describe("pull request lookup for differently named upstream branches", () => {
 
     const calls = await gh.readCalls();
     expect(calls).toHaveLength(1);
-    expect(calls[0]?.join(" ")).toContain(`headRefName: "${upstreamBranch}"`);
+    expect((await gh.readQueries())[0]).toContain(
+      `headRefName: "${upstreamBranch}"`,
+    );
   });
 
   it("never passes an untrusted upstream URL to gh", async () => {

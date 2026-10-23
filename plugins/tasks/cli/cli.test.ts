@@ -1581,29 +1581,32 @@ describe("bb tasks CLI", () => {
             ? { outcome: "absent" }
             : {
                 outcome: "available",
-                pullRequest: {
-                  number: 12,
-                  title: "BB-15 Show PRs in tasks",
-                  state: "draft",
-                  url: "https://github.com/acme/bb/pull/12",
-                  baseRefName: "main",
-                  headRefName: "bb/bb-15",
-                  updatedAt: "2026-07-16T10:00:00.000Z",
-                  checks: {
-                    state: "pending",
-                    totalCount: 1,
-                    passedCount: 0,
-                    failedCount: 0,
-                    pendingCount: 1,
-                  },
-                  review: { state: "none", reviewRequestCount: 0 },
-                  mergeability: {
+                currentBranchUrl: "https://github.com/acme/bb/pull/12",
+                pullRequests: [
+                  {
+                    number: 12,
+                    title: "BB-15 Show PRs in tasks",
                     state: "draft",
-                    mergeStateStatus: null,
-                    mergeable: null,
+                    url: "https://github.com/acme/bb/pull/12",
+                    baseRefName: "main",
+                    headRefName: "bb/bb-15",
+                    updatedAt: "2026-07-16T10:00:00.000Z",
+                    checks: {
+                      state: "pending",
+                      totalCount: 1,
+                      passedCount: 0,
+                      failedCount: 0,
+                      pendingCount: 1,
+                    },
+                    review: { state: "none", reviewRequestCount: 0 },
+                    mergeability: {
+                      state: "draft",
+                      mergeStateStatus: null,
+                      mergeable: null,
+                    },
+                    attention: "draft",
                   },
-                  attention: "draft",
-                },
+                ],
               },
         ),
       },

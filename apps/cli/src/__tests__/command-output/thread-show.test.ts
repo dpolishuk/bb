@@ -37,7 +37,11 @@ describe("bb thread show command output", () => {
           result: {
             [environmentId]:
               row.outcome === "available"
-                ? { outcome: "available", pullRequests: [row.pullRequest] }
+                ? {
+                    outcome: "available",
+                    pullRequests: [row.pullRequest],
+                    currentBranchUrl: row.pullRequest.url,
+                  }
                 : row,
           },
         }),

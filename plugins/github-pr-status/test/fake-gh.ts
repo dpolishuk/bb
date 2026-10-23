@@ -16,7 +16,10 @@ export async function makeTempDir(prefix: string): Promise<string> {
 
 export async function installFakeGh(
   responses: Record<string, FakeGhResponse>,
-): Promise<{ readCalls(): Promise<string[][]> }> {
+): Promise<{
+  readCalls(): Promise<string[][]>;
+  readQueries(): Promise<string[]>;
+}> {
   const binPath = await makeTempDir("bb-fake-gh-");
   const logPath = path.join(binPath, "gh.log");
   const scriptPath = path.join(binPath, "gh.cjs");
@@ -25,7 +28,9 @@ export async function installFakeGh(
     `
 const fs = require("node:fs");
 const args = process.argv.slice(2);
-fs.appendFileSync(process.env.TEST_GH_LOG, JSON.stringify(args) + "\\n");
+const inputIndex = args.indexOf("--input");
+const query = inputIndex === -1 ? null : JSON.parse(fs.readFileSync(args[inputIndex + 1], "utf8")).query;
+fs.appendFileSync(process.env.TEST_GH_LOG, JSON.stringify({args, query}) + "\\n");
 const responses = JSON.parse(process.env.TEST_GH_RESPONSES);
 const response = responses[args.slice(0, 2).join(" ")] ?? {};
 if (response.stdout) process.stdout.write(response.stdout);
@@ -49,13 +54,29 @@ process.exitCode = response.exit ?? 0;
   vi.stubEnv("TEST_GH_RESPONSES", JSON.stringify(responses));
   vi.stubEnv("PATH", `${binPath}${path.delimiter}${process.env.PATH ?? ""}`);
   return {
+    async readQueries() {
+      const lines = (await fs.readFile(logPath, "utf8"))
+        .trim()
+        .split("\n")
+        .filter(Boolean);
+      return lines.flatMap((line) => {
+        const row = z
+          .object({ query: z.string().nullable() })
+          .parse(JSON.parse(line));
+        return row.query === null ? [] : [row.query];
+      });
+    },
     async readCalls() {
       try {
         return (await fs.readFile(logPath, "utf8"))
           .trim()
           .split("\n")
           .filter(Boolean)
-          .map((line) => z.array(z.string()).parse(JSON.parse(line)));
+          .map(
+            (line) =>
+              z.object({ args: z.array(z.string()) }).parse(JSON.parse(line))
+                .args,
+          );
       } catch (error) {
         if (
           error instanceof Error &&

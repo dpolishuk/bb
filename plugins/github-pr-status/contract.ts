@@ -210,6 +210,7 @@ export const environmentPullRequestsSchema = z.discriminatedUnion("outcome", [
     .object({
       outcome: z.literal("available"),
       pullRequests: z.array(pullRequestSchema).min(1),
+      currentBranchUrl: z.string().url().nullable(),
     })
     .strict(),
   z.object({ outcome: z.literal("absent") }).strict(),

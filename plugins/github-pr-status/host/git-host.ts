@@ -1,3 +1,6 @@
+import { mkdtemp, writeFile, rm, readFile } from "node:fs/promises";
+import { tmpdir, homedir } from "node:os";
+import { join, resolve } from "node:path";
 import { createHash } from "node:crypto";
 import {
   experimental_runVcsProcess as runVcsProcess,
@@ -774,19 +777,35 @@ const discovered = new Map<
 >();
 const pausedUntil = new Map<string, number>();
 
-function credentialKey(host: string, env: NodeJS.ProcessEnv): string {
+async function credentialKey(
+  host: string,
+  env: NodeJS.ProcessEnv,
+  cwd: string,
+): Promise<string> {
+  const token =
+    host === "github.com" || host.endsWith(".ghe.com")
+      ? env.GH_TOKEN || env.GITHUB_TOKEN
+      : env.GH_ENTERPRISE_TOKEN || env.GITHUB_ENTERPRISE_TOKEN;
+  if (token)
+    return createHash("sha256")
+      .update(JSON.stringify([host, token]))
+      .digest("hex");
+  const appData = env.APPDATA ?? env.AppData;
+  const directory = resolve(
+    cwd,
+    env.GH_CONFIG_DIR ||
+      (env.XDG_CONFIG_HOME
+        ? join(env.XDG_CONFIG_HOME, "gh")
+        : process.platform === "win32" && appData
+          ? join(appData, "GitHub CLI")
+          : join(env.HOME ?? homedir(), ".config", "gh")),
+  );
+  const profile = await readFile(join(directory, "hosts.yml")).catch(() =>
+    Buffer.alloc(0),
+  );
   return createHash("sha256")
-    .update(
-      JSON.stringify([
-        host,
-        env.GH_TOKEN,
-        env.GITHUB_TOKEN,
-        env.GH_ENTERPRISE_TOKEN,
-        env.GITHUB_ENTERPRISE_TOKEN,
-        env.GH_CONFIG_DIR,
-        env.HOME,
-      ]),
-    )
+    .update(JSON.stringify([host, directory]))
+    .update(profile)
     .digest("hex");
 }
 
@@ -885,6 +904,38 @@ async function decodeRead(
   return { outcome: "found", pullRequest: view };
 }
 
+async function runGraphQLRead(
+  query: string,
+  entry: QueuedRead,
+): Promise<{ stdout: string }> {
+  const directory = await mkdtemp(join(tmpdir(), "bb-pr-read-"));
+  try {
+    const inputPath = join(directory, "query.json");
+    await writeFile(inputPath, JSON.stringify({ query }), { mode: 0o600 });
+    return await runGh(
+      [
+        "api",
+        "graphql",
+        "--hostname",
+        entry.target.host,
+        "--method",
+        "POST",
+        "--input",
+        inputPath,
+      ],
+      {
+        cwd: entry.cwd,
+        env: entry.env,
+        priority: "background",
+        timeoutMs: GH_PR_VIEW_TIMEOUT_MS,
+        maxBuffer: GH_PR_VIEW_MAX_BUFFER_BYTES,
+      },
+    );
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+}
+
 async function flushBatch(group: string): Promise<void> {
   const queued = batches.get(group);
   if (queued === undefined) return;
@@ -903,31 +954,17 @@ async function flushBatch(group: string): Promise<void> {
     }
     try {
       const query = `query { ${entries.map((entry, index) => selection(entry.target, `p${index}`)).join("\n")} rateLimit { remaining resetAt } }`;
-      const { stdout } = await runGh(
-        [
-          "api",
-          "graphql",
-          "--hostname",
-          first.target.host,
-          "-f",
-          `query=${query}`,
-        ],
-        {
-          cwd: first.cwd,
-          env: first.env,
-          priority: "background",
-          timeoutMs: GH_PR_VIEW_TIMEOUT_MS,
-          maxBuffer: GH_PR_VIEW_MAX_BUFFER_BYTES,
+      const { stdout } = await runGraphQLRead(query, first).catch(
+        (error: unknown) => {
+          if (
+            error instanceof GhCommandError &&
+            error.reason === "failed" &&
+            error.stdout.trim().startsWith("{")
+          )
+            return { stdout: error.stdout };
+          throw error;
         },
-      ).catch((error: unknown) => {
-        if (
-          error instanceof GhCommandError &&
-          error.reason === "failed" &&
-          error.stdout.trim().startsWith("{")
-        )
-          return { stdout: error.stdout };
-        throw error;
-      });
+      );
       const response = asObject(JSON.parse(stdout));
       const data = asObject(response?.data);
       const errors = Array.isArray(response?.errors)
@@ -978,14 +1015,14 @@ async function flushBatch(group: string): Promise<void> {
   }
 }
 
-function enqueueRead(
+async function enqueueRead(
   target: ReadTarget,
   cwd: string,
   inheritedEnv = sanitizeInheritedChildProcessEnv({ env: process.env }),
   refresh = false,
 ): Promise<HostPullRequestLookup> {
   const env = { ...inheritedEnv };
-  const group = credentialKey(target.host, env);
+  const group = await credentialKey(target.host, env, cwd);
   const key = `${group}:${JSON.stringify(target)}`;
   if (refresh) discovered.delete(key);
   const cached = discovered.get(key);

@@ -157,7 +157,10 @@ async function fetchPullRequest(args: {
       outputSchema: z.record(z.string(), environmentPullRequestsSchema),
     });
     const response = rows[args.environmentId] ?? { outcome: "absent" };
-    if (response.outcome === "available") {
+    if (
+      response.outcome === "available" &&
+      response.currentBranchUrl !== null
+    ) {
       return {
         status: "available",
         pullRequest: response.pullRequests[0]!,

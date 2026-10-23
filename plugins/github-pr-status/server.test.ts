@@ -4,7 +4,7 @@ import {
   makeHostResponse,
   type ExperimentalFakeHostRpcCall,
 } from "@get-bb/plugin-sdk/testing";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { GitHubPullRequestView } from "./contract.js";
 import plugin, { environmentChangeEffect } from "./server.js";
 
@@ -99,6 +99,29 @@ async function setup(options: {
 }
 
 describe("GitHub PR Status server", () => {
+  afterEach(() => vi.useRealTimers());
+
+  it("keeps identical snapshots unchanged across a real plugin database reload", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const fake = await setup({});
+    await fake.harness.callRpc("experimental_pullRequests", {
+      keys: ["env-1"],
+    });
+    const next = await fake.harness.reload(plugin);
+    const before = next.bb.storage
+      .database()
+      .prepare("SELECT total_changes() AS n")
+      .get();
+    vi.setSystemTime(Date.now() + 11_000);
+    await next.harness.callRpc("experimental_pullRequests", {
+      keys: ["env-1"],
+    });
+    expect(
+      next.bb.storage.database().prepare("SELECT total_changes() AS n").get(),
+    ).toEqual(before);
+    await next.harness.dispose();
+  });
+
   it("reads every requested environment in one call", async () => {
     const fake = await setup({
       environments: {
@@ -120,6 +143,7 @@ describe("GitHub PR Status server", () => {
     ).resolves.toEqual({
       "env-1": {
         outcome: "available",
+        currentBranchUrl: "https://github.com/acme/bb/pull/7",
         pullRequests: [
           expect.objectContaining({
             number: 7,

@@ -84,7 +84,7 @@ export function createPullRequestStore(options: {
       return snapshot ? [snapshot.pullRequest] : [];
     });
     return pullRequests.length > 0
-      ? { outcome: "available", pullRequests }
+      ? { outcome: "available", pullRequests, currentBranchUrl: url }
       : { outcome: "absent" };
   }
 

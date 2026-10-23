@@ -1,3 +1,5 @@
+import { writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { getPullRequestByUrl } from "./git-host.js";
 import { installFakeGh, makeTempDir } from "../test/fake-gh.js";
@@ -98,6 +100,24 @@ describe("host GraphQL batching", () => {
     expect(await gh.readCalls()).toHaveLength(1);
     vi.stubEnv("GH_TOKEN", "credential-two");
     await getPullRequestByUrl(raw(1).url, cwd);
+    expect(await gh.readCalls()).toHaveLength(2);
+  });
+
+  it("releases a gh profile's rate-limit pause after its active account changes", async () => {
+    const gh = await installFakeGh({
+      "api graphql": { stderr: "API rate limit exceeded", exit: 1 },
+    });
+    vi.stubEnv("GH_TOKEN", undefined);
+    vi.stubEnv("GITHUB_TOKEN", undefined);
+    const cwd = await makeTempDir("bb-pr-account-");
+    await getPullRequestByUrl(raw(1).url, cwd);
+    await getPullRequestByUrl(raw(2).url, cwd);
+    expect(await gh.readCalls()).toHaveLength(1);
+    await writeFile(
+      join(process.env.GH_CONFIG_DIR!, "hosts.yml"),
+      "github.com:\n    user: another-account\n",
+    );
+    await getPullRequestByUrl(raw(2).url, cwd);
     expect(await gh.readCalls()).toHaveLength(2);
   });
 

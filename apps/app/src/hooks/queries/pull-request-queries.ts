@@ -20,6 +20,7 @@ export function isEnvironmentPullRequestStale(
 ): boolean {
   const settled =
     row.outcome === "available" &&
+    row.currentBranchUrl !== null &&
     (row.pullRequests[0]?.state === "merged" ||
       row.pullRequests[0]?.state === "closed");
   return (
@@ -110,7 +111,9 @@ export function useEnvironmentPullRequest(
   return {
     isLoading: enabled && query.error === null && row === undefined,
     pullRequest:
-      row?.outcome === "available" ? (row.pullRequests[0] ?? null) : null,
+      row?.outcome === "available" && row.currentBranchUrl !== null
+        ? (row.pullRequests[0] ?? null)
+        : null,
   };
 }
 

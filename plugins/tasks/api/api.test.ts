@@ -1478,22 +1478,26 @@ describe("Tasks RPC domain API", () => {
     const pullRequestsByEnvironment: Record<string, PullRequestLookup> = {
       env_shared: {
         outcome: "available",
-        pullRequest: makePullRequest({
-          number: 12,
-          url: "https://github.com/acme/bb/pull/12",
-          state: "open",
-          updatedAt: "2026-07-15T10:00:00.000Z",
-        }),
+        pullRequests: [
+          makePullRequest({
+            number: 12,
+            url: "https://github.com/acme/bb/pull/12",
+            state: "open",
+            updatedAt: "2026-07-15T10:00:00.000Z",
+          }),
+        ],
       },
       env_merged: {
         outcome: "available",
-        pullRequest: makePullRequest({
-          number: 9,
-          title: "Older merged work",
-          url: "https://github.com/acme/bb/pull/9",
-          state: "merged",
-          updatedAt: "2026-07-16T09:00:00.000Z",
-        }),
+        pullRequests: [
+          makePullRequest({
+            number: 9,
+            title: "Older merged work",
+            url: "https://github.com/acme/bb/pull/9",
+            state: "merged",
+            updatedAt: "2026-07-16T09:00:00.000Z",
+          }),
+        ],
       },
       env_no_pr: { outcome: "absent" },
     };
@@ -1748,10 +1752,12 @@ describe("Tasks RPC domain API", () => {
 
     resolvers.get("env_a")!({
       outcome: "available",
-      pullRequest: makePullRequest({
-        number: 21,
-        url: "https://github.com/acme/bb/pull/21",
-      }),
+      pullRequests: [
+        makePullRequest({
+          number: 21,
+          url: "https://github.com/acme/bb/pull/21",
+        }),
+      ],
     });
     resolvers.get("env_b")!({ outcome: "absent" });
 
@@ -1773,23 +1779,27 @@ describe("Tasks RPC domain API", () => {
     const lookupByEnvironment: Record<string, PullRequestLookup> = {
       env_stale: {
         outcome: "available",
-        pullRequest: makePullRequest({
-          number: 30,
-          title: "Before merge",
-          state: "open",
-          url: "https://github.com/acme/bb/pull/30",
-          updatedAt: "2026-07-15T08:00:00.000Z",
-        }),
+        pullRequests: [
+          makePullRequest({
+            number: 30,
+            title: "Before merge",
+            state: "open",
+            url: "https://github.com/acme/bb/pull/30",
+            updatedAt: "2026-07-15T08:00:00.000Z",
+          }),
+        ],
       },
       env_fresh: {
         outcome: "available",
-        pullRequest: makePullRequest({
-          number: 30,
-          title: "After merge",
-          state: "merged",
-          url: "https://github.com/acme/bb/pull/30",
-          updatedAt: "2026-07-16T12:00:00.000Z",
-        }),
+        pullRequests: [
+          makePullRequest({
+            number: 30,
+            title: "After merge",
+            state: "merged",
+            url: "https://github.com/acme/bb/pull/30",
+            updatedAt: "2026-07-16T12:00:00.000Z",
+          }),
+        ],
       },
     };
     const { bb, harness } = createFakePluginHost({
@@ -1853,7 +1863,11 @@ describe("Tasks RPC domain API", () => {
 });
 
 type PullRequestLookup =
-  | { outcome: "available"; pullRequest: ReturnType<typeof makePullRequest> }
+  | {
+      outcome: "available";
+      currentBranchUrl?: string | null;
+      pullRequests: ReturnType<typeof makePullRequest>[];
+    }
   | { outcome: "absent" }
   | { outcome: "unavailable"; message: string };
 
@@ -1871,12 +1885,28 @@ function githubPrStatusRpc(
     }): Promise<TOutput> {
       expect([args.pluginId, args.method]).toEqual([
         "bb--github-pr-status",
-        "pullRequests",
+        "experimental_pullRequests",
       ]);
       const { keys } = args.input as { keys: string[] };
       return args.outputSchema.parse(
         Object.fromEntries(
-          await Promise.all(keys.map(async (key) => [key, await lookup(key)])),
+          await Promise.all(
+            keys.map(async (key) => {
+              const row = await lookup(key);
+              return [
+                key,
+                row.outcome === "available"
+                  ? {
+                      ...row,
+                      currentBranchUrl:
+                        row.currentBranchUrl === undefined
+                          ? (row.pullRequests[0]?.url ?? null)
+                          : row.currentBranchUrl,
+                    }
+                  : row,
+              ];
+            }),
+          ),
         ),
       );
     },

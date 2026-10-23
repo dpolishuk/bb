@@ -354,7 +354,8 @@ const environmentPullRequestUrlsSchema = z.record(
   z.union([
     z.object({
       outcome: z.literal("available"),
-      pullRequest: z.object({ url: z.string() }),
+      currentBranchUrl: z.string().nullable(),
+      pullRequests: z.array(z.object({ url: z.string() })).min(1),
     }),
     z.object({ outcome: z.enum(["absent", "unavailable"]) }),
   ]),
@@ -1461,13 +1462,15 @@ export default async function plugin(bb: BbPluginApi) {
           environmentId = thread.environmentId;
           const rows = await bb.sdk.plugins.callRpc({
             pluginId: "bb--github-pr-status",
-            method: "pullRequests",
+            method: "experimental_pullRequests",
             input: { keys: [thread.environmentId] },
             outputSchema: environmentPullRequestUrlsSchema,
           });
           const result = rows[thread.environmentId];
           const url =
-            result?.outcome === "available" ? result.pullRequest.url : null;
+            result?.outcome === "available" && result.currentBranchUrl !== null
+              ? result.pullRequests[0]!.url
+              : null;
           const match =
             typeof url === "string"
               ? url.match(/github\.com\/([\w.-]+\/[\w.-]+)\/pull\/(\d+)/)
