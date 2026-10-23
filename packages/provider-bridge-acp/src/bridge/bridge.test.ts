@@ -983,6 +983,38 @@ describe("acp bridge", () => {
     },
   );
 
+  it("forwards additional workspace write roots to agents advertising additionalDirectories", async () => {
+    const requestLog = join(workspaceDir, "additional-directories.jsonl");
+    await startThread({
+      additionalWorkspaceWriteRoots: ["/tmp/bb-extra-root"],
+      envVars: {
+        FAKE_ACP_ADDITIONAL_DIRECTORIES: "1",
+        FAKE_ACP_REQUEST_LOG: requestLog,
+      },
+    });
+
+    const sessionNew = loggedAcpRequests(requestLog).find(
+      (request) => request.method === "session/new",
+    );
+    expect(sessionNew?.params).toMatchObject({
+      cwd: workspaceDir,
+      additionalDirectories: ["/tmp/bb-extra-root"],
+    });
+  });
+
+  it("omits additionalDirectories for agents without the capability", async () => {
+    const requestLog = join(workspaceDir, "no-additional-directories.jsonl");
+    await startThread({
+      additionalWorkspaceWriteRoots: ["/tmp/bb-extra-root"],
+      envVars: { FAKE_ACP_REQUEST_LOG: requestLog },
+    });
+
+    const sessionNew = loggedAcpRequests(requestLog).find(
+      (request) => request.method === "session/new",
+    );
+    expect(sessionNew?.params).not.toHaveProperty("additionalDirectories");
+  });
+
   it.each([
     ["thread/start", "cursor-grok-4.6-medium", "grok-4.6"],
     ["thread/resume", "claude-4.6-sonnet-medium-thinking", "claude-sonnet-4-6"],

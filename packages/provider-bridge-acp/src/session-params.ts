@@ -76,6 +76,7 @@ export interface AcpSessionParams {
   permissionCli?: AcpBridgePermissionCli;
   permissionMode: "accept-edits" | "full";
   workspaceWriteRoots: string[];
+  additionalDirectories?: string[] | undefined;
   envVars?: Record<string, string>;
   instructions?: string;
   dynamicTools?: readonly DynamicTool[];
@@ -335,6 +336,9 @@ export function buildAcpSessionParams(
       : {}),
     permissionMode: options.permissionMode,
     workspaceWriteRoots: [cwd, ...args.additionalWorkspaceWriteRoots],
+    ...(args.additionalWorkspaceWriteRoots.length > 0
+      ? { additionalDirectories: [...args.additionalWorkspaceWriteRoots] }
+      : {}),
     ...(Object.keys(envVars).length > 0 ? { envVars } : {}),
     ...(instructions ? { instructions } : {}),
     ...(args.dynamicTools && args.dynamicTools.length > 0
