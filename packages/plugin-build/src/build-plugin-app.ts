@@ -13,6 +13,7 @@ import { derivePluginId } from "@bb/domain";
 import type { Metafile, Plugin } from "esbuild";
 import {
   PLUGIN_THEME_CSS,
+  HOST_TAILWIND_CSS,
   TW_ANIMATE_CSS,
 } from "./generated/plugin-theme.generated.js";
 import { renameIntoPlace } from "./rename-into-place.js";
@@ -34,6 +35,7 @@ import {
   SHARED_UI_VOICE_INPUT_TEXTAREA_SPECIFIER,
 } from "./runtime-shims.mjs";
 import {
+  dropHostProvidedTailwind,
   pluginScopeRoots,
   scopePluginUtilities,
 } from "./scope-plugin-utilities.js";
@@ -469,7 +471,10 @@ async function buildTailwindCss(
     }
   }
   return scopePluginUtilities(
-    compiler.build([...candidates]),
+    dropHostProvidedTailwind(
+      compiler.build([...candidates]),
+      HOST_TAILWIND_CSS,
+    ),
     pluginScopeRoots(pluginId),
   );
 }
