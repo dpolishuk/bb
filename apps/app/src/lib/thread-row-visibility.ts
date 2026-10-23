@@ -5,7 +5,7 @@ import {
   type RefObject,
 } from "react";
 
-export type ThreadRowVisibility = "offscreen" | "near" | "onscreen" | "live";
+export type ThreadRowVisibility = "offscreen" | "near" | "live";
 
 export const THREAD_ROW_SETTLE_MS = 200;
 const NEAR_MARGIN = "240px 0px";
@@ -25,8 +25,7 @@ let settleTimer: ReturnType<typeof setTimeout> | undefined;
 
 function visibilityOf(state: RowState): ThreadRowVisibility {
   if (!state.near && !state.onScreen) return "offscreen";
-  if (state.live) return "live";
-  return state.onScreen ? "onscreen" : "near";
+  return state.live ? "live" : "near";
 }
 
 function update(state: RowState, change: () => void): void {

@@ -1,3 +1,4 @@
+import { useState } from "react";
 import {
   definePluginApp,
   experimental_useRpcKeyedQuery,
@@ -52,6 +53,7 @@ export function PullRequestBadge({
 }: {
   pullRequest: PullRequest;
 }) {
+  const [hovered, setHovered] = useState(false);
   const state = PULL_REQUEST_STATE_DISPLAY[pullRequest.state];
   const checks = getPullRequestGithubCheckStatus(pullRequest);
   const counts = checks === null ? null : checkCounts(pullRequest);
@@ -62,29 +64,32 @@ export function PullRequestBadge({
   ]
     .filter((part) => part !== null)
     .join(", ");
+  const glyph = (
+    <span
+      role="img"
+      aria-label={label}
+      data-pull-request-badge={pullRequest.state}
+      data-pull-request-checks={checks ?? undefined}
+      className="relative flex size-4 shrink-0 items-center justify-center"
+      onPointerEnter={hovered ? undefined : () => setHovered(true)}
+    >
+      <Icon name={state.icon} className={cn("size-3.5", state.className)} />
+      {checks === null ? null : (
+        <span
+          aria-hidden
+          className={cn(
+            "absolute -bottom-px -right-px size-1.5 rounded-full ring-1 ring-sidebar",
+            CHECK_DOT_CLASS[checks],
+            checks === "pending" && "animate-pulse",
+          )}
+        />
+      )}
+    </span>
+  );
+  if (!hovered) return glyph;
   return (
     <Tooltip>
-      <TooltipTrigger asChild>
-        <span
-          role="img"
-          aria-label={label}
-          data-pull-request-badge={pullRequest.state}
-          data-pull-request-checks={checks ?? undefined}
-          className="relative flex size-4 shrink-0 items-center justify-center"
-        >
-          <Icon name={state.icon} className={cn("size-3.5", state.className)} />
-          {checks === null ? null : (
-            <span
-              aria-hidden
-              className={cn(
-                "absolute -bottom-px -right-px size-1.5 rounded-full ring-1 ring-sidebar",
-                CHECK_DOT_CLASS[checks],
-                checks === "pending" && "animate-pulse",
-              )}
-            />
-          )}
-        </span>
-      </TooltipTrigger>
+      <TooltipTrigger asChild>{glyph}</TooltipTrigger>
       <TooltipContent side="top" className="max-w-72">
         <div className="truncate">
           #{pullRequest.number} {pullRequest.title}

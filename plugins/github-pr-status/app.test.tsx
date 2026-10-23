@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, waitFor } from "@testing-library/react";
 import type {
   ExperimentalThreadRowItemProps,
   PluginSidebarThread,
@@ -107,7 +107,7 @@ function unexpectedAction(): never {
 }
 function Row(props: ExperimentalThreadRowItemProps) {
   return (
-    <TooltipProvider>
+    <TooltipProvider delayDuration={0}>
       <Item {...props} />
     </TooltipProvider>
   );
@@ -194,5 +194,32 @@ describe("pull request row item", () => {
       name: "Pull request #6143, merged",
     });
     expect(badge.dataset.pullRequestChecks).toBeUndefined();
+  });
+
+  it("shows the number, title and check counts in a tooltip on hover", async () => {
+    const pr = pullRequest();
+    const view = renderRow(
+      { thread: thread("env_row"), isLive: true },
+      {
+        env_row: {
+          outcome: "available",
+          pullRequests: [pr],
+          currentBranchUrl: pr.url,
+        },
+      },
+    );
+    const badge = await view.findByRole("img", {
+      name: "Pull request #6143, open, checks running",
+    });
+    fireEvent.pointerEnter(badge);
+    fireEvent.pointerMove(
+      view.getByRole("img", { name: "Pull request #6143, open, checks running" }),
+    );
+    expect(
+      await view.findAllByText("#6143 Share and persist GitHub PR refreshes"),
+    ).not.toHaveLength(0);
+    expect(
+      (await view.findAllByText(/11 passed, 3 pending/)).length,
+    ).toBeGreaterThan(0);
   });
 });
