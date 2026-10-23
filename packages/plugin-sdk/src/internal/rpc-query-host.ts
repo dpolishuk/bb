@@ -3,7 +3,7 @@ import type {
   ExperimentalRpcKeyedValue,
 } from "../rpc-contract.js";
 import { experimental_PluginRpcCallError } from "../rpc-contract.js";
-import { useCallback, useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { useIsFetching, type QueryClient } from "@tanstack/react-query";
 import {
   invalidateTags,
@@ -338,9 +338,13 @@ export function createRpcQueryHooks(useHost: () => RpcQueryHost) {
           watches.set(key, host.watch?.(pluginId, options.method, { key }));
       }
     }, [host, pluginId, options.method, keys, enabled, watches]);
+    const heldKeys = useRef(keys);
+    useEffect(() => {
+      heldKeys.current = keys;
+    }, [keys]);
     const refetch = useCallback(async () => {
-      await current.refresh(keys);
-    }, [current, keys]);
+      await current.refresh(heldKeys.current);
+    }, [current]);
     return {
       ...query,
       refetch,

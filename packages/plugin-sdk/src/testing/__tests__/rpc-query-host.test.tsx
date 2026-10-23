@@ -515,3 +515,36 @@ it("refetches only the calling hook's keys, batching hooks that refetch together
     client.clear();
   }
 });
+
+it("keeps a keyed hook's refetch stable while its keys change", async () => {
+  const client = new QueryClient();
+  const host = {
+    pluginId: "demo",
+    queryClient: client,
+    subscribe: () => () => {},
+    call: async (_plugin: string, _method: string, input: unknown) =>
+      Object.fromEntries(
+        (input as { keys: string[] }).keys.map((key) => [key, 1]),
+      ),
+  };
+  const contract = defineRpcContract({
+    rows: {
+      input: z.object({ keys: z.array(z.string()) }),
+      output: z.record(z.string(), z.number()),
+    },
+  });
+  const hooks = createRpcQueryHooks(() => host);
+  const probe = renderHook(
+    ({ keys }) =>
+      hooks.experimental_useRpcKeyedQuery({ contract, method: "rows", keys }),
+    { initialProps: { keys: ["a"] } },
+  );
+  try {
+    const first = probe.result.current.refetch;
+    probe.rerender({ keys: ["a", "b"] });
+    expect(probe.result.current.refetch).toBe(first);
+  } finally {
+    probe.unmount();
+    client.clear();
+  }
+});
