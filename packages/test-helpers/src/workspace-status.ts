@@ -4,7 +4,6 @@ import type {
   WorkspaceWorkingTree,
 } from "bb-git-contract";
 
-
 export function makeWorkspaceWorkingTree(
   overrides: Partial<WorkspaceWorkingTree> = {},
 ): WorkspaceWorkingTree {

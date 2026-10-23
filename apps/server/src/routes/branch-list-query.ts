@@ -1,6 +1,5 @@
-
+import { BRANCH_LIST_LIMIT_MAX } from "@bb/server-contract";
 import { parseBoundedPositiveOptionalInteger } from "../services/lib/validation.js";
-import { BRANCH_LIST_LIMIT_MAX } from "bb-git-contract";
 
 const BRANCH_LIST_LIMIT_DEFAULT = 50;
 

@@ -47,10 +47,10 @@
     "@bb/config": "workspace:*",
     "@bb/core-ui": "workspace:*",
     "@bb/domain": "workspace:*",
+    "bb-git-contract": "workspace:*",
     "@bb/host-daemon-contract": "workspace:*",
     "@bb/server-contract": "workspace:*",
     "@bb/templates": "workspace:*",
-    "bb-git-contract": "workspace:*",
     "ws": "^8.19.0",
     "zod": "^4.3.6"
   },

@@ -1,7 +1,4 @@
 export type {
-  GitBranchSelection,
-} from "bb-git-contract";
-export type {
   CallerExecutionInputSource,
   ContextSnapshot,
   ContextCategory,
@@ -21,6 +18,7 @@ export type {
   UnmanagedBranchSpec,
   WorkspaceArgs,
 } from "@bb/server-contract";
+export type { GitBranchSelection } from "bb-git-contract";
 
 export type * from "./realtime.js";
 export type * from "./areas/environments.js";

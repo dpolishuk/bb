@@ -23,7 +23,7 @@ describe("bundled plugin SDK declarations", () => {
       "upload(args: ProjectAttachmentUploadArgs): Promise<ProjectAttachmentUploadResult>;",
     );
     expect(declarations).toContain(
-      "type EnvironmentStatusResult = EnvironmentStatusResponse;",
+      "type EnvironmentCommitResult = CommitActionResponse;",
     );
     expect(declarations).not.toMatch(/from ['"]bb-git-contract/u);
     expect(declarations).toContain("interface PluginCatalogArea");

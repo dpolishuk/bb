@@ -1,9 +1,16 @@
+import { tmpdir } from "node:os";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { initRepo, makeTempDir } from "@bb/test-helpers";
+import { WorkspaceReads } from "./workspace-reads.js";
 import { runGit } from "bb-environment-provider-host/workspace-git";
-import { Workspace } from "../src/workspace.js";
+
+let freshReads = 0;
+function fresh() {
+  freshReads += 1;
+  return { work: `work-${freshReads}`, refs: `refs-${freshReads}` };
+}
 
 vi.mock("bb-environment-provider-host/workspace-git", async (importOriginal) => {
   const actual = await importOriginal<typeof import("bb-environment-provider-host/workspace-git")>();
@@ -20,7 +27,7 @@ it("reuses committed comparisons across readers while refreshing edits and moved
   await runGit(["add", "."], { cwd: repo });
   await runGit(["commit", "-m", "Feature"], { cwd: repo });
   const read = (maxFiles = 200) =>
-    new Workspace(repo).getStatus({ mergeBaseBranch: "main", maxFiles });
+    new WorkspaceReads(repo, tmpdir()).getStatus({ freshness: fresh(), mergeBaseBranch: "main", maxFiles });
   const comparisons = () =>
     vi
       .mocked(runGit)
@@ -84,7 +91,7 @@ it("returns degraded comparisons on Git failures without caching them", async ()
     }
     return actual.runGit(args, options);
   });
-  const read = () => new Workspace(repo).getStatus({ mergeBaseBranch: "main" });
+  const read = () => new WorkspaceReads(repo, tmpdir()).getStatus({ freshness: fresh(), mergeBaseBranch: "main" });
   try {
     expect((await read()).mergeBase).toMatchObject({
       aheadCount: 1,
@@ -138,7 +145,7 @@ async function advanceMain(repo: string, count: number) {
 it("filters irrelevant history beyond 200 commits and reports incomplete only at the metadata limit", async () => {
   const repo = await createDivergedRepo();
   await advanceMain(repo, 200);
-  const underLimit = await new Workspace(repo).getStatus({
+  const underLimit = await new WorkspaceReads(repo, tmpdir()).getStatus({ freshness: fresh(),
     mergeBaseBranch: "main",
   });
   expect(underLimit.mergeBase).toMatchObject({
@@ -147,8 +154,8 @@ it("filters irrelevant history beyond 200 commits and reports incomplete only at
     behindCount: 201,
   });
   await advanceMain(repo, 800);
-  const workspace = new Workspace(repo);
-  const result = await workspace.getStatus({ mergeBaseBranch: "main" });
+  const workspace = new WorkspaceReads(repo, tmpdir());
+  const result = await workspace.getStatus({ freshness: fresh(), mergeBaseBranch: "main" });
   expect(result.mergeBase).toMatchObject({
     squashMergeCheckComplete: false,
     aheadCount: 1,
@@ -174,7 +181,7 @@ it("filters irrelevant history beyond 200 commits and reports incomplete only at
       ).length;
   const comparisonsBeforeRefresh = comparisons();
   await fs.writeFile(path.join(repo, "feature.txt"), "edited\n");
-  const refreshed = await workspace.getStatus({ mergeBaseBranch: "main" });
+  const refreshed = await workspace.getStatus({ freshness: fresh(), mergeBaseBranch: "main" });
   expect(refreshed.workingTree.hasUncommittedChanges).toBe(true);
   expect(refreshed.mergeBase).toEqual(result.mergeBase);
   expect(patchCommands()).toHaveLength(0);
@@ -200,7 +207,7 @@ it("cancels an over-budget squash command and returns basic comparison data", as
     return actual.runGit(args, options);
   });
   try {
-    const status = await new Workspace(repo).getStatus({
+    const status = await new WorkspaceReads(repo, tmpdir()).getStatus({ freshness: fresh(),
       mergeBaseBranch: "main",
     });
     expect(canceled).toBe(true);
@@ -220,7 +227,7 @@ it("stops oversized patch collection without claiming the branch is merged", asy
     featureText: "large line\n".repeat(850_000),
     basePath: "feature.txt",
   });
-  const status = await new Workspace(repo).getStatus({
+  const status = await new WorkspaceReads(repo, tmpdir()).getStatus({ freshness: fresh(),
     mergeBaseBranch: "main",
   });
   expect(status.mergeBase).toMatchObject({
@@ -250,7 +257,7 @@ it.each([
       cwd: repo,
     });
     await runGit(["checkout", "feature"], { cwd: repo });
-    const status = await new Workspace(repo).getStatus({
+    const status = await new WorkspaceReads(repo, tmpdir()).getStatus({ freshness: fresh(),
       mergeBaseBranch: "main",
     });
     expect(status.mergeBase).toMatchObject({
@@ -272,7 +279,7 @@ it("proves exact squash integration without hashing even beyond the metadata lim
   await runGit(["merge", "--squash", "feature"], { cwd: repo });
   await runGit(["commit", "-m", "Squashed feature"], { cwd: repo });
   await runGit(["checkout", "feature"], { cwd: repo });
-  const status = await new Workspace(repo).getStatus({
+  const status = await new WorkspaceReads(repo, tmpdir()).getStatus({ freshness: fresh(),
     mergeBaseBranch: "main",
   });
   expect(status.mergeBase).toMatchObject({
@@ -311,7 +318,7 @@ it.each([
   await runGit(["merge", "--squash", "feature"], { cwd: repo });
   await runGit(["commit", "-m", "Squashed feature"], { cwd: repo });
   await runGit(["checkout", "feature"], { cwd: repo });
-  const status = await new Workspace(repo).getStatus({
+  const status = await new WorkspaceReads(repo, tmpdir()).getStatus({ freshness: fresh(),
     mergeBaseBranch: "main",
   });
   expect(status.mergeBase).toMatchObject({
@@ -363,7 +370,7 @@ it("finishes a timed-out squash check on the next refresh without rehashing comm
           args.includes("-p") &&
           args.includes("--no-renames") !== renames,
       ).length;
-  const read = () => new Workspace(repo).getStatus({ mergeBaseBranch: "main" });
+  const read = () => new WorkspaceReads(repo, tmpdir()).getStatus({ freshness: fresh(), mergeBaseBranch: "main" });
   try {
     expect((await read()).mergeBase).toMatchObject({
       squashMergeCheckComplete: false,
@@ -401,7 +408,7 @@ it("excludes cherry-picked commits on both sides but keeps same-file changes", a
   await runGit(["commit", "-m", "Same file, different change"], { cwd: repo });
   await runGit(["checkout", "feature"], { cwd: repo });
 
-  const status = await new Workspace(repo).getStatus({
+  const status = await new WorkspaceReads(repo, tmpdir()).getStatus({ freshness: fresh(),
     mergeBaseBranch: "main",
   });
 
@@ -437,13 +444,13 @@ it("keeps renamed files compact when comparing squash patches", async () => {
   await runGit(["commit", "-m", "Later main change"], { cwd: repo });
   await runGit(["checkout", "feature"], { cwd: repo });
 
-  let status = await new Workspace(repo).getStatus({ mergeBaseBranch: "main" });
+  let status = await new WorkspaceReads(repo, tmpdir()).getStatus({ freshness: fresh(), mergeBaseBranch: "main" });
   for (
     let refresh = 0;
     refresh < 5 && !status.mergeBase?.squashMergeCheckComplete;
     refresh += 1
   ) {
-    status = await new Workspace(repo).getStatus({ mergeBaseBranch: "main" });
+    status = await new WorkspaceReads(repo, tmpdir()).getStatus({ freshness: fresh(), mergeBaseBranch: "main" });
   }
 
   expect(status.mergeBase).toMatchObject({

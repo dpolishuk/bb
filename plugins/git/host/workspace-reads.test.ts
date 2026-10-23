@@ -1,19 +1,26 @@
+import { tmpdir } from "node:os";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-
-import { createDeferredPromise, initRepo, makeTempDir } from "@bb/test-helpers";
-import {
-  ProcessLocalQueuedLockTimeoutError,
-  withProcessLocalQueuedLocks,
-} from "bb-environment-provider-host/process-local-lock";
-import { Workspace } from "../src/workspace.js";
-import {
-  WorkspaceError,
-  runGit,
-} from "bb-environment-provider-host/workspace-git";
-import { withCheckoutMutationLock } from "../src/checkout-mutation-lock.js";
+import { initRepo, makeTempDir } from "@bb/test-helpers";
+import { WorkspaceReads } from "./workspace-reads.js";
 import type { WorkspaceChangeStats } from "bb-git-contract";
+import {
+  runGit,
+  WorkspaceError,
+} from "bb-environment-provider-host/workspace-git";
+
+const UNLIMITED_DIFF = {
+  maxDiffBytes: 64 * 1024 * 1024,
+  maxFileListBytes: 64 * 1024 * 1024,
+  maxUntrackedFiles: 100_000,
+};
+
+let freshReads = 0;
+function fresh() {
+  freshReads += 1;
+  return { work: `work-${freshReads}`, refs: `refs-${freshReads}` };
+}
 
 type DiffStats = {
   filesCount: number;
@@ -76,22 +83,22 @@ async function mergeFeatureIntoMainWithSquash(
   });
 }
 
-describe("Workspace", () => {
+describe("WorkspaceReads", () => {
   it("reports clean, dirty, untracked-only, and mixed workspace states", async () => {
     const repoPath = await initRepo(await makeTempDir("bb-workspace-repo-"));
-    const workspace = new Workspace(repoPath);
+    const workspace = new WorkspaceReads(repoPath, tmpdir());
 
-    expect((await workspace.getStatus()).workingTree.state).toBe("clean");
+    expect((await workspace.getStatus({ freshness: fresh() })).workingTree.state).toBe("clean");
 
     await fs.writeFile(path.join(repoPath, "README.md"), "dirty\n", "utf8");
-    expect((await workspace.getStatus()).workingTree.state).toBe(
+    expect((await workspace.getStatus({ freshness: fresh() })).workingTree.state).toBe(
       "dirty_uncommitted",
     );
 
     await runGit(["reset", "--hard", "HEAD"], { cwd: repoPath });
     await runGit(["clean", "-fd"], { cwd: repoPath });
     await fs.writeFile(path.join(repoPath, "notes.txt"), "note\n", "utf8");
-    const untrackedStatus = await workspace.getStatus();
+    const untrackedStatus = await workspace.getStatus({ freshness: fresh() });
     expect(untrackedStatus.workingTree.state).toBe("untracked");
     expect(untrackedStatus.workingTree.files).toEqual([
       {
@@ -110,18 +117,18 @@ describe("Workspace", () => {
       "dirty with note\n",
       "utf8",
     );
-    const mixedStatus = await workspace.getStatus();
+    const mixedStatus = await workspace.getStatus({ freshness: fresh() });
     expect(mixedStatus.workingTree.state).toBe("dirty_uncommitted");
     expect(mixedStatus.workingTree.files).toHaveLength(2);
   });
 
   it("reports deleted tracked files as dirty file changes", async () => {
     const repoPath = await initRepo(await makeTempDir("bb-workspace-repo-"));
-    const workspace = new Workspace(repoPath);
+    const workspace = new WorkspaceReads(repoPath, tmpdir());
 
     await fs.rm(path.join(repoPath, "README.md"));
 
-    const status = await workspace.getStatus();
+    const status = await workspace.getStatus({ freshness: fresh() });
     expect(status.workingTree.state).toBe("dirty_uncommitted");
     expect(status.workingTree.files).toEqual([
       {
@@ -135,7 +142,7 @@ describe("Workspace", () => {
 
   it("joins per-file numstat to a rename+modify under the new path", async () => {
     const repoPath = await initRepo(await makeTempDir("bb-workspace-repo-"));
-    const workspace = new Workspace(repoPath);
+    const workspace = new WorkspaceReads(repoPath, tmpdir());
 
     await runGit(["mv", "README.md", "NOTES.md"], { cwd: repoPath });
     await fs.writeFile(
@@ -144,7 +151,7 @@ describe("Workspace", () => {
       "utf8",
     );
 
-    const status = await workspace.getStatus();
+    const status = await workspace.getStatus({ freshness: fresh() });
     expect(status.workingTree.files).toEqual([
       {
         path: "NOTES.md",
@@ -171,8 +178,8 @@ describe("Workspace", () => {
       "utf8",
     );
 
-    const workspace = new Workspace(repoPath);
-    const status = await workspace.getStatus();
+    const workspace = new WorkspaceReads(repoPath, tmpdir());
+    const status = await workspace.getStatus({ freshness: fresh() });
 
     expect(status.workingTree.files).toEqual([
       {
@@ -192,149 +199,6 @@ describe("Workspace", () => {
     expect(status.workingTree.deletions).toBe(0);
   });
 
-  it("changes the local state fingerprint when local checkout state changes", async () => {
-    const repoPath = await initRepo(await makeTempDir("bb-workspace-repo-"));
-    const workspace = new Workspace(repoPath);
-
-    const initialFingerprint = await workspace.getLocalStateSnapshot();
-    expect(initialFingerprint.branchName).toBe("main");
-
-    await fs.writeFile(path.join(repoPath, "README.md"), "dirty\n", "utf8");
-    const dirtyFingerprint = await workspace.getLocalStateSnapshot();
-    expect(dirtyFingerprint.fingerprint).not.toBe(
-      initialFingerprint.fingerprint,
-    );
-
-    await runGit(["checkout", "-b", "feature"], { cwd: repoPath });
-    const branchFingerprint = await workspace.getLocalStateSnapshot();
-    expect(branchFingerprint.fingerprint).not.toBe(
-      dirtyFingerprint.fingerprint,
-    );
-    expect(branchFingerprint.branchName).toBe("feature");
-    await runGit(["checkout", "--detach"], { cwd: repoPath });
-    const detached = await workspace.getLocalStateSnapshot();
-    expect(detached.branchName).toBeNull();
-    expect(detached.fingerprint).not.toBe(branchFingerprint.fingerprint);
-  });
-
-  it("observes the initial branch before the first commit", async () => {
-    const repoPath = await makeTempDir("bb-workspace-unborn-");
-    await runGit(["init", "-b", "main"], { cwd: repoPath });
-    const workspace = new Workspace(repoPath);
-    expect((await workspace.getLocalStateSnapshot()).branchName).toBe("main");
-    expect(
-      (await workspace.getSharedGitRefsSnapshot()).defaultBranch,
-    ).toBeNull();
-  });
-
-  it("fingerprints an untracked path without reading its contents", async () => {
-    const repoPath = await initRepo(await makeTempDir("bb-workspace-repo-"));
-    const workspace = new Workspace(repoPath);
-    const initialFingerprint = await workspace.getLocalStateSnapshot();
-
-    await fs.writeFile(path.join(repoPath, "notes.txt"), "one\n", "utf8");
-    const untrackedFingerprint = await workspace.getLocalStateSnapshot();
-    expect(untrackedFingerprint.fingerprint).not.toBe(
-      initialFingerprint.fingerprint,
-    );
-
-    await fs.writeFile(path.join(repoPath, "notes.txt"), "one\ntwo\n", "utf8");
-    expect(await workspace.getLocalStateSnapshot()).toEqual(
-      untrackedFingerprint,
-    );
-  });
-
-  it.for(["files", "reftable"])(
-    "includes the default branch in %s shared refs without depending on file edits",
-    async (format, context) => {
-      const repoPath = await makeTempDir("bb-workspace-repo-");
-      await initRepo(repoPath);
-      if (format === "reftable") {
-        const migration = await runGit(
-          ["refs", "migrate", "--ref-format=reftable"],
-          { cwd: repoPath, allowFailure: true },
-        );
-        if (migration.exitCode !== 0) context.skip();
-      }
-      const workspace = new Workspace(repoPath);
-      const initialSnapshot = await workspace.getSharedGitRefsSnapshot();
-      expect(initialSnapshot.defaultBranch).toBe("main");
-
-      await fs.writeFile(path.join(repoPath, "README.md"), "dirty\n", "utf8");
-      expect(await workspace.getSharedGitRefsSnapshot()).toEqual(
-        initialSnapshot,
-      );
-
-      await runGit(["branch", "feature"], { cwd: repoPath });
-      const branchSnapshot = await workspace.getSharedGitRefsSnapshot();
-      expect(branchSnapshot.fingerprint).not.toBe(initialSnapshot.fingerprint);
-      expect(branchSnapshot.defaultBranch).toBe("main");
-
-      await runGit(["update-ref", "refs/remotes/origin/main", "HEAD"], {
-        cwd: repoPath,
-      });
-      await runGit(["update-ref", "refs/remotes/origin/trunk", "HEAD"], {
-        cwd: repoPath,
-      });
-      await runGit(
-        [
-          "symbolic-ref",
-          "refs/remotes/origin/HEAD",
-          "refs/remotes/origin/main",
-        ],
-        { cwd: repoPath },
-      );
-      const originMainSnapshot = await workspace.getSharedGitRefsSnapshot();
-      expect(originMainSnapshot.defaultBranch).toBe("main");
-      await runGit(
-        [
-          "symbolic-ref",
-          "refs/remotes/origin/HEAD",
-          "refs/remotes/origin/trunk",
-        ],
-        { cwd: repoPath },
-      );
-      const remoteSnapshot = await workspace.getSharedGitRefsSnapshot();
-      expect(remoteSnapshot.fingerprint).not.toBe(
-        originMainSnapshot.fingerprint,
-      );
-      expect(remoteSnapshot.defaultBranch).toBe("trunk");
-      await runGit(["update-ref", "-d", "refs/remotes/origin/trunk"], {
-        cwd: repoPath,
-      });
-      expect((await workspace.getSharedGitRefsSnapshot()).defaultBranch).toBe(
-        "trunk",
-      );
-      await runGit(
-        [
-          "symbolic-ref",
-          "refs/remotes/origin/trunk",
-          "refs/remotes/origin/missing",
-        ],
-        { cwd: repoPath },
-      );
-      expect((await workspace.getSharedGitRefsSnapshot()).defaultBranch).toBe(
-        "missing",
-      );
-      await runGit(["symbolic-ref", "--delete", "refs/remotes/origin/trunk"], {
-        cwd: repoPath,
-      });
-
-      await runGit(["symbolic-ref", "--delete", "refs/remotes/origin/HEAD"], {
-        cwd: repoPath,
-      });
-      await runGit(["branch", "-m", "main", "master"], { cwd: repoPath });
-      expect((await workspace.getSharedGitRefsSnapshot()).defaultBranch).toBe(
-        "master",
-      );
-      await runGit(["checkout", "feature"], { cwd: repoPath });
-      await runGit(["branch", "-D", "master"], { cwd: repoPath });
-      expect((await workspace.getSharedGitRefsSnapshot()).defaultBranch).toBe(
-        "feature",
-      );
-    },
-  );
-
   it("returns grouped status details only when merge-base data is requested", async () => {
     const repoPath = await initRepo(await makeTempDir("bb-workspace-repo-"));
     await runGit(["checkout", "-b", "feature"], { cwd: repoPath });
@@ -342,12 +206,12 @@ describe("Workspace", () => {
     await runGit(["add", "README.md"], { cwd: repoPath });
     await runGit(["commit", "-m", "Feature commit"], { cwd: repoPath });
 
-    const workspace = new Workspace(repoPath);
-    const localOnlyStatus = await workspace.getStatus();
+    const workspace = new WorkspaceReads(repoPath, tmpdir());
+    const localOnlyStatus = await workspace.getStatus({ freshness: fresh() });
     expect(localOnlyStatus.mergeBase).toBeNull();
     expect(localOnlyStatus.workingTree.state).toBe("clean");
 
-    const status = await workspace.getStatus({ mergeBaseBranch: "main" });
+    const status = await workspace.getStatus({ freshness: fresh(), mergeBaseBranch: "main" });
     expect(status.workingTree.state).toBe("committed_unmerged");
     expect(status.branch.currentBranch).toBe("feature");
     expect(status.branch.defaultBranch).toBe("main");
@@ -380,9 +244,9 @@ describe("Workspace", () => {
         "utf8",
       );
     }
-    const workspace = new Workspace(repoPath);
+    const workspace = new WorkspaceReads(repoPath, tmpdir());
 
-    const status = await workspace.getStatus({ maxFiles: 3 });
+    const status = await workspace.getStatus({ freshness: fresh(), maxFiles: 3 });
     expect(status.workingTree.fileCount).toBe(7);
     expect(status.workingTree.state).toBe("dirty_uncommitted");
     expect(status.workingTree.insertions).toBe(2);
@@ -395,13 +259,13 @@ describe("Workspace", () => {
       ["??", "artifacts/shot-0.txt"],
     ]);
 
-    const trackedOnly = await workspace.getStatus({ maxFiles: 1 });
+    const trackedOnly = await workspace.getStatus({ freshness: fresh(), maxFiles: 1 });
     expect(trackedOnly.workingTree.fileCount).toBe(7);
     expect(
       trackedOnly.workingTree.files.map((file) => [file.status, file.path]),
     ).toEqual([["M", "a.txt"]]);
 
-    const uncapped = await workspace.getStatus();
+    const uncapped = await workspace.getStatus({ freshness: fresh() });
     expect(uncapped.workingTree.fileCount).toBe(7);
     expect(uncapped.workingTree.files).toHaveLength(7);
   });
@@ -415,7 +279,7 @@ describe("Workspace", () => {
     await runGit(["add", "."], { cwd: repoPath });
     await runGit(["commit", "-m", "Feature files"], { cwd: repoPath });
 
-    const status = await new Workspace(repoPath).getStatus({
+    const status = await new WorkspaceReads(repoPath, tmpdir()).getStatus({ freshness: fresh(),
       mergeBaseBranch: "main",
       maxFiles: 2,
     });
@@ -428,7 +292,7 @@ describe("Workspace", () => {
   it("rejects a non-positive status file cap", async () => {
     const repoPath = await initRepo(await makeTempDir("bb-workspace-repo-"));
     await expect(
-      new Workspace(repoPath).getStatus({ maxFiles: 0 }),
+      new WorkspaceReads(repoPath, tmpdir()).getStatus({ freshness: fresh(), maxFiles: 0 }),
     ).rejects.toBeInstanceOf(WorkspaceError);
   });
 
@@ -444,8 +308,8 @@ describe("Workspace", () => {
       "utf8",
     );
 
-    const workspace = new Workspace(repoPath);
-    const status = await workspace.getStatus({ mergeBaseBranch: "main" });
+    const workspace = new WorkspaceReads(repoPath, tmpdir());
+    const status = await workspace.getStatus({ freshness: fresh(), mergeBaseBranch: "main" });
 
     expect(status.workingTree.state).toBe("dirty_and_committed_unmerged");
     expect(status.workingTree.files).toEqual([
@@ -481,8 +345,8 @@ describe("Workspace", () => {
     await runGit(["commit", "-m", "Main update"], { cwd: repoPath });
     await runGit(["checkout", "feature"], { cwd: repoPath });
 
-    const workspace = new Workspace(repoPath);
-    const status = await workspace.getStatus({ mergeBaseBranch: "main" });
+    const workspace = new WorkspaceReads(repoPath, tmpdir());
+    const status = await workspace.getStatus({ freshness: fresh(), mergeBaseBranch: "main" });
 
     expect(status.workingTree.state).toBe("clean");
     expect(status.mergeBase).toMatchObject({
@@ -505,13 +369,13 @@ describe("Workspace", () => {
     await runGit(["add", "feature.txt"], { cwd: worktreePath });
     await runGit(["commit", "-m", "Feature extra"], { cwd: worktreePath });
 
-    const workspace = new Workspace(worktreePath);
+    const workspace = new WorkspaceReads(worktreePath, tmpdir());
     await mergeFeatureIntoMainWithSquash(
       primaryRepo,
       "feat: squash merge multi-commit feature into main",
     );
 
-    const status = await workspace.getStatus({ mergeBaseBranch: "main" });
+    const status = await workspace.getStatus({ freshness: fresh(), mergeBaseBranch: "main" });
 
     expect(status.mergeBase).toMatchObject({
       mergeBaseBranch: "main",
@@ -536,7 +400,7 @@ describe("Workspace", () => {
     await runGit(["add", "feature.txt"], { cwd: worktreePath });
     await runGit(["commit", "-m", "Feature extra"], { cwd: worktreePath });
 
-    const workspace = new Workspace(worktreePath);
+    const workspace = new WorkspaceReads(worktreePath, tmpdir());
     await mergeFeatureIntoMainWithSquash(
       primaryRepo,
       "feat: squash merge feature into main",
@@ -552,7 +416,7 @@ describe("Workspace", () => {
       cwd: primaryRepo,
     });
 
-    const status = await workspace.getStatus({ mergeBaseBranch: "main" });
+    const status = await workspace.getStatus({ freshness: fresh(), mergeBaseBranch: "main" });
 
     expect(status.mergeBase).toMatchObject({
       mergeBaseBranch: "main",
@@ -578,8 +442,8 @@ describe("Workspace", () => {
     await runGit(["add", "main-work.txt"], { cwd: primaryRepo });
     await runGit(["commit", "-m", "Main advance"], { cwd: primaryRepo });
 
-    const workspace = new Workspace(worktreePath);
-    const status = await workspace.getStatus({ mergeBaseBranch: "main" });
+    const workspace = new WorkspaceReads(worktreePath, tmpdir());
+    const status = await workspace.getStatus({ freshness: fresh(), mergeBaseBranch: "main" });
 
     expect(status.mergeBase).toMatchObject({
       mergeBaseBranch: "main",
@@ -595,8 +459,8 @@ describe("Workspace", () => {
     await runGit(["add", "extra.txt"], { cwd: worktreePath });
     await runGit(["commit", "-m", "Feature extra"], { cwd: worktreePath });
 
-    const workspace = new Workspace(worktreePath);
-    const status = await workspace.getStatus({ mergeBaseBranch: "main" });
+    const workspace = new WorkspaceReads(worktreePath, tmpdir());
+    const status = await workspace.getStatus({ freshness: fresh(), mergeBaseBranch: "main" });
 
     expect(status.mergeBase).toMatchObject({
       mergeBaseBranch: "main",
@@ -617,13 +481,13 @@ describe("Workspace", () => {
     await runGit(["add", "notes.txt"], { cwd: primaryRepo });
     await runGit(["commit", "-m", "Main work"], { cwd: primaryRepo });
 
-    const workspace = new Workspace(worktreePath);
+    const workspace = new WorkspaceReads(worktreePath, tmpdir());
     await mergeFeatureIntoMainWithSquash(
       primaryRepo,
       "feat: squash merge feature into main",
     );
 
-    const status = await workspace.getStatus({ mergeBaseBranch: "main" });
+    const status = await workspace.getStatus({ freshness: fresh(), mergeBaseBranch: "main" });
 
     expect(status.workingTree.state).toBe("clean");
     expect(status.mergeBase).toMatchObject({
@@ -651,8 +515,8 @@ describe("Workspace", () => {
       "utf8",
     );
 
-    const workspace = new Workspace(repoPath);
-    const status = await workspace.getStatus({ mergeBaseBranch: "main" });
+    const workspace = new WorkspaceReads(repoPath, tmpdir());
+    const status = await workspace.getStatus({ freshness: fresh(), mergeBaseBranch: "main" });
 
     expect(status.workingTree.state).toBe("dirty_uncommitted");
     expect(status.branch.currentBranch).toBe("main");
@@ -707,12 +571,12 @@ describe("Workspace", () => {
       "utf8",
     );
 
-    const workspace = new Workspace(repoPath);
-    const status = await workspace.getStatus({ mergeBaseBranch: "main" });
+    const workspace = new WorkspaceReads(repoPath, tmpdir());
+    const status = await workspace.getStatus({ freshness: fresh(), mergeBaseBranch: "main" });
     const commitSha = status.mergeBase?.commits[0]?.sha;
     expect(commitSha).toBeDefined();
 
-    const uncommitted = await workspace.getDiff({
+    const uncommitted = await workspace.getDiff({ ...UNLIMITED_DIFF, freshness: fresh(),
       target: { type: "uncommitted" },
     });
     expect(uncommitted.diff).toContain("feature plus pending");
@@ -721,12 +585,12 @@ describe("Workspace", () => {
     expect(uncommitted.files).toContain("notes.txt");
     expect(uncommitted.shortstat).toContain("2 files changed");
 
-    const branchCommitted = await workspace.getDiff({
+    const branchCommitted = await workspace.getDiff({ ...UNLIMITED_DIFF, freshness: fresh(),
       target: { type: "branch_committed", mergeBaseBranch: "main" },
     });
     expect(branchCommitted.diff).toContain("+feature");
 
-    const all = await workspace.getDiff({
+    const all = await workspace.getDiff({ ...UNLIMITED_DIFF, freshness: fresh(),
       target: { type: "all", mergeBaseBranch: "main" },
     });
     expect(all.diff).toContain("feature plus pending");
@@ -735,7 +599,7 @@ describe("Workspace", () => {
     expect(all.files).toContain("notes.txt");
     expect(all.shortstat).toContain("2 files changed");
 
-    const commitOnly = await workspace.getDiff({
+    const commitOnly = await workspace.getDiff({ ...UNLIMITED_DIFF, freshness: fresh(),
       target: { type: "commit", sha: commitSha! },
     });
     expect(commitOnly.diff).toContain("+feature");
@@ -748,8 +612,8 @@ describe("Workspace", () => {
     await runGit(["add", "README.md"], { cwd: repoPath });
     await runGit(["commit", "-m", "Feature commit"], { cwd: repoPath });
 
-    const workspace = new Workspace(repoPath);
-    const status = await workspace.getStatus({ mergeBaseBranch: "main" });
+    const workspace = new WorkspaceReads(repoPath, tmpdir());
+    const status = await workspace.getStatus({ freshness: fresh(), mergeBaseBranch: "main" });
     expect(status.workingTree.files).toEqual([]);
     const mergeBase = status.mergeBase;
     expect(mergeBase).not.toBeNull();
@@ -757,10 +621,10 @@ describe("Workspace", () => {
       throw new Error("Expected merge-base status");
     }
 
-    const allChanges = await workspace.getDiff({
+    const allChanges = await workspace.getDiff({ ...UNLIMITED_DIFF, freshness: fresh(),
       target: { type: "all", mergeBaseBranch: "main" },
     });
-    const committedChanges = await workspace.getDiff({
+    const committedChanges = await workspace.getDiff({ ...UNLIMITED_DIFF, freshness: fresh(),
       target: { type: "branch_committed", mergeBaseBranch: "main" },
     });
     const bannerStats = tallyWorkspaceStats(mergeBase);
@@ -778,14 +642,14 @@ describe("Workspace", () => {
     );
     await fs.writeFile(path.join(repoPath, "notes.txt"), "note\n", "utf8");
 
-    const workspace = new Workspace(repoPath);
-    const status = await workspace.getStatus({ mergeBaseBranch: "main" });
+    const workspace = new WorkspaceReads(repoPath, tmpdir());
+    const status = await workspace.getStatus({ freshness: fresh(), mergeBaseBranch: "main" });
     expect(status.mergeBase?.files ?? []).toEqual([]);
 
-    const allChanges = await workspace.getDiff({
+    const allChanges = await workspace.getDiff({ ...UNLIMITED_DIFF, freshness: fresh(),
       target: { type: "all", mergeBaseBranch: "main" },
     });
-    const uncommittedChanges = await workspace.getDiff({
+    const uncommittedChanges = await workspace.getDiff({ ...UNLIMITED_DIFF, freshness: fresh(),
       target: { type: "uncommitted" },
     });
     const bannerStats = tallyWorkspaceStats(status.workingTree);
@@ -818,7 +682,7 @@ describe("Workspace", () => {
       cwd: repoPath,
     });
 
-    const status = await new Workspace(repoPath).getStatus({
+    const status = await new WorkspaceReads(repoPath, tmpdir()).getStatus({ freshness: fresh(),
       maxUntrackedLineStatFiles: 10,
       maxUntrackedLineStatBytes: 1024,
     });
@@ -861,7 +725,7 @@ describe("Workspace", () => {
     });
     await runGit(["rm", "--cached", "replacement.txt"], { cwd: repoPath });
 
-    const status = await new Workspace(repoPath).getStatus({
+    const status = await new WorkspaceReads(repoPath, tmpdir()).getStatus({ freshness: fresh(),
       maxUntrackedLineStatFiles: 10,
       maxUntrackedLineStatBytes: 1024,
     });
@@ -895,7 +759,7 @@ describe("Workspace", () => {
     await runGit(["init", "-b", "main"], { cwd: nestedRepoPath });
     await fs.writeFile(path.join(nestedRepoPath, "inside.txt"), "inside\n");
 
-    const status = await new Workspace(repoPath).getStatus({
+    const status = await new WorkspaceReads(repoPath, tmpdir()).getStatus({ freshness: fresh(),
       maxUntrackedLineStatFiles: 10,
       maxUntrackedLineStatBytes: 1024,
     });
@@ -925,13 +789,13 @@ describe("Workspace", () => {
     const repoPath = await initRepo(await makeTempDir("bb-workspace-repo-"));
     await fs.writeFile(path.join(repoPath, "one.txt"), "one\n", "utf8");
     await fs.writeFile(path.join(repoPath, "two.txt"), "two\n", "utf8");
-    const workspace = new Workspace(repoPath);
+    const workspace = new WorkspaceReads(repoPath, tmpdir());
 
-    const overFileBudget = await workspace.getStatus({
+    const overFileBudget = await workspace.getStatus({ freshness: fresh(),
       maxUntrackedLineStatFiles: 1,
       maxUntrackedLineStatBytes: 1024,
     });
-    const overByteBudget = await workspace.getStatus({
+    const overByteBudget = await workspace.getStatus({ freshness: fresh(),
       maxUntrackedLineStatFiles: 10,
       maxUntrackedLineStatBytes: 1,
     });
@@ -959,14 +823,14 @@ describe("Workspace", () => {
     );
     await fs.writeFile(path.join(repoPath, "notes.txt"), "note\n", "utf8");
 
-    const workspace = new Workspace(repoPath);
-    const status = await workspace.getStatus({ mergeBaseBranch: "main" });
+    const workspace = new WorkspaceReads(repoPath, tmpdir());
+    const status = await workspace.getStatus({ freshness: fresh(), mergeBaseBranch: "main" });
     expect(status.workingTree.state).toBe("dirty_and_committed_unmerged");
 
-    const allChanges = await workspace.getDiff({
+    const allChanges = await workspace.getDiff({ ...UNLIMITED_DIFF, freshness: fresh(),
       target: { type: "all", mergeBaseBranch: "main" },
     });
-    const uncommittedChanges = await workspace.getDiff({
+    const uncommittedChanges = await workspace.getDiff({ ...UNLIMITED_DIFF, freshness: fresh(),
       target: { type: "uncommitted" },
     });
     const bannerStats = tallyWorkspaceStats(status.workingTree);
@@ -989,8 +853,8 @@ describe("Workspace", () => {
       "utf8",
     );
 
-    const workspace = new Workspace(repoPath);
-    const diff = await workspace.getDiff({
+    const workspace = new WorkspaceReads(repoPath, tmpdir());
+    const diff = await workspace.getDiff({ ...UNLIMITED_DIFF, freshness: fresh(),
       target: { type: "all", mergeBaseBranch: "main" },
       maxDiffBytes: 128,
     });
@@ -1004,7 +868,7 @@ describe("Workspace", () => {
 
   it("includes untracked files in one combined diff", async () => {
     const repoPath = await initRepo(await makeTempDir("bb-workspace-repo-"));
-    const workspace = new Workspace(repoPath);
+    const workspace = new WorkspaceReads(repoPath, tmpdir());
 
     await Promise.all(
       Array.from({ length: 12 }, async (_, index) => {
@@ -1016,7 +880,7 @@ describe("Workspace", () => {
       }),
     );
 
-    const diff = await workspace.getDiff({
+    const diff = await workspace.getDiff({ ...UNLIMITED_DIFF, freshness: fresh(),
       target: { type: "uncommitted" },
     });
 
@@ -1030,7 +894,7 @@ describe("Workspace", () => {
     await fs.writeFile(path.join(repoPath, "a.txt"), "first\n", "utf8");
     await fs.writeFile(path.join(repoPath, "b.txt"), "second\n", "utf8");
 
-    const diff = await new Workspace(repoPath).getDiff({
+    const diff = await new WorkspaceReads(repoPath, tmpdir()).getDiff({ ...UNLIMITED_DIFF, freshness: fresh(),
       target: { type: "uncommitted" },
       maxUntrackedFiles: 1,
     });
@@ -1042,149 +906,4 @@ describe("Workspace", () => {
     expect(diff.diff).not.toContain("second");
   });
 
-  it("commits staged work", async () => {
-    const repoPath = await initRepo(await makeTempDir("bb-workspace-repo-"));
-    const workspace = new Workspace(repoPath);
-
-    await fs.writeFile(path.join(repoPath, "README.md"), "commit me\n", "utf8");
-    const commit = await workspace.commit({
-      message: "Commit from workspace",
-      noVerify: false,
-    });
-    const head = (
-      await runGit(["rev-parse", "HEAD"], { cwd: repoPath })
-    ).stdout.trim();
-    expect(commit.commitSha).toBe(head);
-  });
-
-  it("throws a typed no_changes error when there is nothing to commit", async () => {
-    const repoPath = await initRepo(await makeTempDir("bb-workspace-repo-"));
-    const workspace = new Workspace(repoPath);
-
-    await expect(
-      workspace.commit({ message: "nothing to commit", noVerify: false }),
-    ).rejects.toMatchObject({
-      name: "WorkspaceError",
-      code: "no_changes",
-    });
-
-    await fs.writeFile(path.join(repoPath, "new.txt"), "real work\n", "utf8");
-    const commit = await workspace.commit({
-      message: "real commit",
-      noVerify: false,
-    });
-    expect(typeof commit.commitSha).toBe("string");
-  });
-
-  it("serializes same-checkout mutations", async () => {
-    const repoPath = await initRepo(await makeTempDir("bb-workspace-repo-"));
-    const workspace = new Workspace(repoPath);
-    await fs.writeFile(path.join(repoPath, "README.md"), "pending\n", "utf8");
-
-    const lockEntered = createDeferredPromise<void>();
-    const releaseLock = createDeferredPromise<void>();
-    const heldLock = withCheckoutMutationLock(repoPath, async () => {
-      lockEntered.resolve();
-      await releaseLock.promise;
-    });
-    await lockEntered.promise;
-
-    let commitCompleted = false;
-    const commit = workspace
-      .commit({ message: "pending", noVerify: false })
-      .then(() => {
-        commitCompleted = true;
-      });
-    await waitForLockContention();
-
-    expect(commitCompleted).toBe(false);
-
-    releaseLock.resolve();
-    await Promise.all([heldLock, commit]);
-
-    expect(commitCompleted).toBe(true);
-    expect((await workspace.getStatus()).workingTree.state).toBe("clean");
-  });
-
-  it("does not serialize different linked worktree checkout mutations", async () => {
-    const repoPath = await initRepo(await makeTempDir("bb-workspace-repo-"));
-    const worktreeParent = await makeTempDir("bb-workspace-lock-worktrees-");
-    const worktreePath = path.join(worktreeParent, "feature");
-    await runGit(["worktree", "add", "-b", "feature", worktreePath, "main"], {
-      cwd: repoPath,
-    });
-
-    const primaryLockEntered = createDeferredPromise<void>();
-    const releasePrimaryLock = createDeferredPromise<void>();
-    const primaryLock = withCheckoutMutationLock(repoPath, async () => {
-      primaryLockEntered.resolve();
-      await releasePrimaryLock.promise;
-    });
-    await primaryLockEntered.promise;
-
-    let worktreeLockEntered = false;
-    await withCheckoutMutationLock(worktreePath, async () => {
-      worktreeLockEntered = true;
-    });
-
-    releasePrimaryLock.resolve();
-    await primaryLock;
-
-    expect(worktreeLockEntered).toBe(true);
-  });
-
-  it("skips process-local lock waiters that time out before entry", async () => {
-    const entered = createDeferredPromise<void>();
-    const release = createDeferredPromise<void>();
-    let timedOutWorkRan = false;
-    const first = withProcessLocalQueuedLocks({
-      locks: [{ key: "timed-out-skip-lock", timeoutMs: 0 }],
-      work: async () => {
-        entered.resolve();
-        await release.promise;
-      },
-    });
-    await entered.promise;
-
-    await expect(
-      withProcessLocalQueuedLocks({
-        locks: [{ key: "timed-out-skip-lock", timeoutMs: 10 }],
-        work: async () => {
-          timedOutWorkRan = true;
-        },
-      }),
-    ).rejects.toBeInstanceOf(ProcessLocalQueuedLockTimeoutError);
-
-    release.resolve();
-    await first;
-    await expect(
-      withProcessLocalQueuedLocks({
-        locks: [{ key: "timed-out-skip-lock", timeoutMs: 1000 }],
-        work: async () => "after-timeout",
-      }),
-    ).resolves.toBe("after-timeout");
-    expect(timedOutWorkRan).toBe(false);
-  });
-
-  it("rejects git mutations for non-git directories", async () => {
-    const folder = await makeTempDir("bb-workspace-nongit-");
-    const workspace = new Workspace(folder);
-
-    expect(await workspace.currentBranch).toBeUndefined();
-    await expect(
-      workspace.commit({ message: "nope", noVerify: false }),
-    ).rejects.toThrow(/not a git repository/u);
-    await expect(workspace.getStatus()).rejects.toThrow(WorkspaceError);
-  });
-
-  it("returns null when HEAD is unavailable in an empty repository", async () => {
-    const repoPath = await makeTempDir("bb-workspace-empty-repo-");
-    await runGit(["init", "-b", "main"], { cwd: repoPath });
-    await runGit(["config", "user.name", "BB Tests"], { cwd: repoPath });
-    await runGit(["config", "user.email", "bb@example.com"], { cwd: repoPath });
-
-    const workspace = new Workspace(repoPath);
-
-    expect(await workspace.getHeadSha()).toBeNull();
-  });
 });

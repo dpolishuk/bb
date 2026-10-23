@@ -12,6 +12,7 @@ import {
 } from "./dispatch-helpers.js";
 import { RuntimeManager } from "../../src/runtime-manager.js";
 import { WorkspaceError } from "bb-environment-provider-host/workspace-git";
+
 function streamedEntries(emitted: EventSinkInput[]) {
   return emitted.flatMap((input) =>
     input.event.type === "system/thread-provisioning"

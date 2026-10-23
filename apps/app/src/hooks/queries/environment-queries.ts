@@ -1,11 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import type { Environment } from "@bb/domain";
-import type {
-  EnvironmentDiffBranchesResponse,
-  EnvironmentDiffFilesResponse,
-  EnvironmentStatusResponse,
-  WorkspacePathListResponse,
-} from "@bb/server-contract";
+import type { WorkspacePathListResponse } from "@bb/server-contract";
 import type { EnvironmentDiffArgs } from "@bb/sdk/browser";
 import type {
   EnvironmentFilePreviewSource,
@@ -26,6 +21,7 @@ import {
   environmentWorkStatusQueryKey,
 } from "./query-keys";
 import { useDebouncedBranchSearchQuery } from "./branch-search-debounce";
+import { gitPluginReads, useGitPluginWatch } from "./git-plugin-reads";
 import {
   resolveEnvironmentDiffFilesPlaceholder,
   resolveEnvironmentMergeBaseBranchesPlaceholder,
@@ -39,7 +35,11 @@ import {
   REALTIME_OWNED_NO_FOCUS_QUERY_POLICY,
   TYPEAHEAD_QUERY_POLICY,
 } from "./query-policies";
-import type { WorkspaceDiffTarget } from "bb-git-contract";
+import type { WorkspaceDiffTarget, GitBranchOptions } from "bb-git-contract";
+import type {
+  GitFilesResult,
+  GitStatusResult,
+} from "bb-plugin-bb--git/contract";
 
 interface EnvironmentQueryOptions extends QueryOptions {
   staleTime?: number;
@@ -98,21 +98,24 @@ export function useEnvironmentWorkStatus(
   const normalizedMergeBaseBranch = mergeBaseBranch ?? null;
   const enabled = (options?.enabled ?? true) && Boolean(environmentId);
   useEnvironmentDetailRealtimeSubscription(environmentId, { enabled });
+  useGitPluginWatch(environmentId, enabled);
 
-  return useQuery<EnvironmentStatusResponse>({
+  return useQuery<GitStatusResult>({
     queryKey: environmentWorkStatusQueryKey(
       environmentId,
       normalizedMergeBaseBranch,
     ),
     queryFn: ({ signal }) =>
-      sdk.environments.status({
-        environmentId: requireEnvironmentId(
-          environmentId,
-          "useEnvironmentWorkStatus",
-        ),
-        mergeBaseBranch,
+      gitPluginReads.workspaceStatus(
+        {
+          environmentId: requireEnvironmentId(
+            environmentId,
+            "useEnvironmentWorkStatus",
+          ),
+          ...(mergeBaseBranch === undefined ? {} : { mergeBaseBranch }),
+        },
         signal,
-      }),
+      ),
     enabled,
     ...REALTIME_OWNED_MOUNT_BASELINE_QUERY_POLICY,
     staleTime: 0,
@@ -136,7 +139,8 @@ export function useEnvironmentMergeBaseBranches(
   const limit = options?.limit ?? MERGE_BASE_BRANCHES_LIMIT;
   const enabled = (options?.enabled ?? true) && Boolean(environmentId);
   useEnvironmentDetailRealtimeSubscription(environmentId, { enabled });
-  return useQuery<EnvironmentDiffBranchesResponse>({
+  useGitPluginWatch(environmentId, enabled);
+  return useQuery<GitBranchOptions>({
     queryKey: environmentMergeBaseBranchesQueryKey(
       environmentId,
       query,
@@ -144,13 +148,15 @@ export function useEnvironmentMergeBaseBranches(
       selectedBranch ?? "",
     ),
     queryFn: ({ signal }) =>
-      sdk.environments.diffBranches({
-        environmentId,
-        ...(query ? { query } : {}),
-        ...(selectedBranch ? { selectedBranch } : {}),
-        limit: String(limit),
+      gitPluginReads.branches(
+        {
+          environmentId,
+          ...(query ? { query } : {}),
+          ...(selectedBranch ? { selectedBranch } : {}),
+          limit,
+        },
         signal,
-      }),
+      ),
     enabled,
     ...REALTIME_OWNED_NO_FOCUS_QUERY_POLICY,
     staleTime: MERGE_BASE_BRANCHES_STALE_MS,
@@ -272,8 +278,9 @@ export function useEnvironmentDiffFiles(
   const enabled =
     (options.enabled ?? true) && Boolean(environmentId) && target !== undefined;
   useEnvironmentDetailRealtimeSubscription(environmentId, { enabled });
+  useGitPluginWatch(environmentId, enabled);
 
-  return useQuery<EnvironmentDiffFilesResponse>({
+  return useQuery<GitFilesResult>({
     queryKey: environmentDiffFilesQueryKey(
       environmentId,
       target?.type ?? null,
@@ -281,18 +288,18 @@ export function useEnvironmentDiffFiles(
       ignoreWhitespace,
     ),
     queryFn: ({ signal }) =>
-      sdk.environments.diffFiles({
-        ...buildEnvironmentDiffArgs(
+      gitPluginReads.files(
+        {
           environmentId,
-          requireEnabledQueryArg({
+          target: requireEnabledQueryArg({
             value: target,
             hookName: "useEnvironmentDiffFiles",
             argName: "target",
           }),
-        ),
-        ignoreWhitespace,
+          ignoreWhitespace,
+        },
         signal,
-      }),
+      ),
     enabled,
     placeholderData: (previousData, previousQuery) =>
       resolveEnvironmentDiffFilesPlaceholder(

@@ -6,8 +6,6 @@ import {
   makeWorkspaceWorkingTree,
 } from "@bb/test-helpers";
 import type {
-  EnvironmentDiffBranchesResponse,
-  EnvironmentStatusResponse,
   ProjectBranchesResponse,
   SidebarBootstrapResponse,
   ThreadResponse,
@@ -45,7 +43,8 @@ import { createQueryClientTestHarness } from "@/test/queryClientTestHarness";
 import { HttpError } from "@/lib/api";
 import { BbHttpError } from "@/lib/sdk";
 import { isTransientReadError, requireEnabledQueryArg } from "./query-helpers";
-import type { WorkspaceStatus } from "bb-git-contract";
+import type { WorkspaceStatus, GitBranchOptions } from "bb-git-contract";
+import type { GitStatusResult } from "bb-plugin-bb--git/contract";
 
 describe("requireEnabledQueryArg", () => {
   it("keeps a numeric zero rather than treating it as missing", () => {
@@ -109,7 +108,7 @@ describe("isTransientReadError", () => {
 
 function makeStatusResponse(
   state: WorkspaceStatus["workingTree"]["state"],
-): EnvironmentStatusResponse {
+): GitStatusResult {
   return {
     outcome: "available",
     workspace: makeWorkspaceStatus({
@@ -143,7 +142,7 @@ function makeProjectBranchesResponse(): ProjectBranchesResponse {
   };
 }
 
-function makeEnvironmentDiffBranchesResponse(): EnvironmentDiffBranchesResponse {
+function makeEnvironmentDiffBranchesResponse(): GitBranchOptions {
   return {
     branches: ["main"],
     branchesTruncated: false,
@@ -203,7 +202,7 @@ function makeThreadTimelineResponse(
 describe("resolveEnvironmentWorkStatusPlaceholder", () => {
   it("reuses previous work status only for the same thread query", () => {
     const previousStatus = makeStatusResponse("clean");
-    const previousNotApplicableStatus: EnvironmentStatusResponse = {
+    const previousNotApplicableStatus: GitStatusResult = {
       outcome: "not_applicable",
       reason: "non_git_environment",
       message: "Workspace status is not available for non-git environments",

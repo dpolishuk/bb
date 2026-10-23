@@ -1,6 +1,5 @@
 import type { GitSourceInspection } from "bb-git-contract";
 
-
 interface ResolveDefaultWorktreeBaseBranchArgs {
   defaultBranch: GitSourceInspection["defaultBranch"];
   defaultBranchRelation: GitSourceInspection["defaultBranchRelation"];

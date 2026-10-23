@@ -2,26 +2,12 @@ import type {
   HostDaemonInjectedSkillSource,
   WorkspaceContext,
 } from "@bb/host-daemon-contract";
-
 import type { RuntimeEntry, RuntimeManager } from "./runtime-manager.js";
 import {
-  CommandDispatchError,
   ExpectedCommandDispatchError,
   requireWorkspaceEnvironment,
 } from "./command-dispatch-support.js";
-import {
-  workspaceResolutionFailureCodeSchema,
-  type WorkspaceResolutionFailure,
-  type WorkspaceResolutionFailureCode,
-} from "bb-git-contract";
-import { WorkspaceError } from "bb-environment-provider-host/workspace-git";
-const WORKSPACE_RESOLUTION_FAILURE_CODES: readonly WorkspaceResolutionFailureCode[] =
-  workspaceResolutionFailureCodeSchema.options;
-
-interface WorkspaceResolutionFailureFromErrorArgs {
-  error: unknown;
-  workspacePath: string;
-}
+import { workspaceResolutionFailureFromError } from "bb-environment-provider-host/workspace-git";
 
 interface ResolveWorkspaceForCommandArgs {
   environmentId: string;
@@ -32,76 +18,9 @@ interface ResolveWorkspaceForCommandArgs {
   workspaceContext: WorkspaceContext;
 }
 
-type WorkspaceResolutionResult =
-  | {
-      ok: true;
-      entry: RuntimeEntry;
-    }
-  | {
-      ok: false;
-      failure: WorkspaceResolutionFailure;
-    };
-
-interface PermissionDeniedError extends Error {
-  readonly code: "EACCES" | "EPERM";
-}
-
-function isWorkspaceResolutionFailureCode(
-  code: string,
-): code is WorkspaceResolutionFailureCode {
-  return WORKSPACE_RESOLUTION_FAILURE_CODES.some((value) => value === code);
-}
-
-function isPermissionDeniedError(
-  error: unknown,
-): error is PermissionDeniedError {
-  if (!(error instanceof Error)) {
-    return false;
-  }
-  const code = Reflect.get(error, "code");
-  return code === "EACCES" || code === "EPERM";
-}
-
-export function workspaceResolutionFailureFromError(
-  args: WorkspaceResolutionFailureFromErrorArgs,
-): WorkspaceResolutionFailure {
-  const { error, workspacePath } = args;
-  if (
-    error instanceof WorkspaceError ||
-    error instanceof CommandDispatchError
-  ) {
-    return {
-      code: isWorkspaceResolutionFailureCode(error.code)
-        ? error.code
-        : "unknown",
-      message: error.message,
-      workspacePath,
-    };
-  }
-  if (isPermissionDeniedError(error)) {
-    return {
-      code: "permission_denied",
-      message: error.message,
-      workspacePath,
-    };
-  }
-  if (error instanceof Error && error.message.trim().length > 0) {
-    return {
-      code: "unknown",
-      message: error.message,
-      workspacePath,
-    };
-  }
-  return {
-    code: "unknown",
-    message: "Unknown workspace resolution failure",
-    workspacePath,
-  };
-}
-
-export async function resolveWorkspaceForCommand(
+export async function requireResolvedWorkspaceForCommand(
   args: ResolveWorkspaceForCommandArgs,
-): Promise<WorkspaceResolutionResult> {
+): Promise<RuntimeEntry> {
   try {
     const entry = await requireWorkspaceEnvironment(
       {
@@ -123,37 +42,18 @@ export async function resolveWorkspaceForCommand(
         workspacePath: args.workspaceContext.workspacePath,
       });
       if (!workspace.isGitRepo) {
-        return {
-          ok: false,
-          failure: {
-            code: "not_git_repo",
-            message: `Path is not a git repository: ${entry.workspace.path}`,
-            workspacePath: entry.workspace.path,
-          },
-        };
+        throw new ExpectedCommandDispatchError(
+          "not_git_repo",
+          `Path is not a git repository: ${entry.workspace.path}`,
+        );
       }
     }
-    return { ok: true, entry };
+    return entry;
   } catch (error) {
-    return {
-      ok: false,
-      failure: workspaceResolutionFailureFromError({
-        error,
-        workspacePath: args.workspaceContext.workspacePath,
-      }),
-    };
+    const failure = workspaceResolutionFailureFromError(
+      error,
+      args.workspaceContext.workspacePath,
+    );
+    throw new ExpectedCommandDispatchError(failure.code, failure.message);
   }
-}
-
-export async function requireResolvedWorkspaceForCommand(
-  args: ResolveWorkspaceForCommandArgs,
-): Promise<RuntimeEntry> {
-  const resolution = await resolveWorkspaceForCommand(args);
-  if (resolution.ok) {
-    return resolution.entry;
-  }
-  throw new ExpectedCommandDispatchError(
-    resolution.failure.code,
-    resolution.failure.message,
-  );
 }

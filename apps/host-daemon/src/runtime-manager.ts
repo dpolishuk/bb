@@ -49,6 +49,7 @@ import { userExecutableProcessOptions } from "./user-executable-env.js";
 import { runSetupScript } from "./environment-lifecycle-script.js";
 import { runInSerialLane } from "./serial-lane.js";
 import { WorkspaceError } from "bb-environment-provider-host/workspace-git";
+
 type StopWatching = () => void | Promise<void>;
 
 const STOP_WATCHING: StopWatching = () => undefined;

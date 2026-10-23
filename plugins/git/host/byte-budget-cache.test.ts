@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { ByteBudgetCache } from "../src/byte-budget-cache.js";
+import { ByteBudgetCache } from "./byte-budget-cache.js";
 
 it("evicts least recently used entries once the byte budget is exceeded", () => {
   const cache = new ByteBudgetCache<string>(10);

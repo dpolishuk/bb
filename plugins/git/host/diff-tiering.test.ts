@@ -1,14 +1,11 @@
-
-import type { DiffFileEntry } from "@bb/server-contract";
+import type { DiffFileEntry } from "../contract.js";
 import { describe, expect, it } from "vitest";
 import {
   DIFF_FILE_AUTO_LOAD_MAX_CHANGED_LINES,
   DIFF_FILE_TOO_LARGE_CHANGED_LINES,
   DIFF_FILES_INLINE_PATCH_MAX_FILES,
-} from "../constants.js";
-import {
-  rawDiffFileStatToEntry,
   selectInitialPatchPaths,
+  toDiffFileEntry,
 } from "./diff-tiering.js";
 import type { RawDiffFileStat } from "bb-git-contract";
 
@@ -41,9 +38,9 @@ function makeStat(overrides: Partial<RawDiffFileStat>): RawDiffFileStat {
   };
 }
 
-describe("rawDiffFileStatToEntry", () => {
+describe("toDiffFileEntry", () => {
   it("carries identity fields through unchanged", () => {
-    const entry = rawDiffFileStatToEntry(
+    const entry = toDiffFileEntry(
       makeStat({
         path: "src/a.ts",
         additions: 3,
@@ -61,7 +58,7 @@ describe("rawDiffFileStatToEntry", () => {
   });
 
   it("maps a rename and preserves previousPath", () => {
-    const entry = rawDiffFileStatToEntry(
+    const entry = toDiffFileEntry(
       makeStat({
         statusLetter: "R",
         path: "src/new.ts",
@@ -82,7 +79,7 @@ describe("rawDiffFileStatToEntry", () => {
     { letter: "C", kind: "copied" },
     { letter: "T", kind: "type_changed" },
   ] as const)("maps status letter $letter to $kind", ({ letter, kind }) => {
-    const entry = rawDiffFileStatToEntry(makeStat({ statusLetter: letter }));
+    const entry = toDiffFileEntry(makeStat({ statusLetter: letter }));
     expect(entry.changeKind).toBe(kind);
   });
 
@@ -112,7 +109,7 @@ describe("rawDiffFileStatToEntry", () => {
     ] as const)(
       "is $expected at additions=$additions deletions=$deletions",
       ({ additions, deletions, expected }) => {
-        const entry = rawDiffFileStatToEntry(
+        const entry = toDiffFileEntry(
           makeStat({ additions, deletions }),
         );
         expect(entry.loadMode).toBe(expected);
@@ -120,14 +117,14 @@ describe("rawDiffFileStatToEntry", () => {
     );
 
     it("forces on_demand for a binary file under the auto threshold", () => {
-      const entry = rawDiffFileStatToEntry(
+      const entry = toDiffFileEntry(
         makeStat({ binary: true, additions: 0, deletions: 0 }),
       );
       expect(entry.loadMode).toBe("on_demand");
     });
 
     it("keeps a binary file too_large when it exceeds the too-large threshold", () => {
-      const entry = rawDiffFileStatToEntry(
+      const entry = toDiffFileEntry(
         makeStat({
           binary: true,
           additions: DIFF_FILE_TOO_LARGE_CHANGED_LINES + 1,

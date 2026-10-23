@@ -1,10 +1,23 @@
+import { tmpdir } from "node:os";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { initRepo, makeTempDir } from "@bb/test-helpers";
 import { describe, expect, it, vi } from "vitest";
-import { Workspace } from "../src/workspace.js";
-import { runGit } from "bb-environment-provider-host/workspace-git";
+import { WorkspaceReads } from "./workspace-reads.js";
 import type { RawDiffFileStat, WorkspaceDiffTarget } from "bb-git-contract";
+import { runGit } from "bb-environment-provider-host/workspace-git";
+
+const UNLIMITED_DIFF = {
+  maxDiffBytes: 64 * 1024 * 1024,
+  maxFileListBytes: 64 * 1024 * 1024,
+  maxUntrackedFiles: 100_000,
+};
+
+let freshReads = 0;
+function fresh() {
+  freshReads += 1;
+  return { work: `work-${freshReads}`, refs: `refs-${freshReads}` };
+}
 
 async function write(
   repoPath: string,
@@ -65,11 +78,11 @@ function findFile(
 const UNCOMMITTED: WorkspaceDiffTarget = { type: "uncommitted" };
 
 async function fullDiffSectionFor(
-  workspace: Workspace,
+  workspace: WorkspaceReads,
   target: WorkspaceDiffTarget,
   newPath: string,
 ): Promise<string> {
-  const full = await workspace.getDiff({ target });
+  const full = await workspace.getDiff({ ...UNLIMITED_DIFF, freshness: fresh(), target });
   const sections = splitFullDiff(full.diff);
   return sections.get(newPath) ?? "";
 }
@@ -120,18 +133,18 @@ describe("Workspace.diffFiles", () => {
     await write(repoPath, "staged.txt", "staged pending\n");
     await runGit(["add", "staged.txt"], { cwd: repoPath });
     await write(repoPath, "untracked.txt", "untracked pending\n");
-    const workspace = new Workspace(repoPath);
+    const workspace = new WorkspaceReads(repoPath, tmpdir());
     const statusBefore = await runGit(["status", "--porcelain=v1"], {
       cwd: repoPath,
     });
 
-    const diff = await workspace.getDiff({ target: UNCOMMITTED });
-    const files = await workspace.diffFiles({
+    const diff = await workspace.getDiff({ ...UNLIMITED_DIFF, freshness: fresh(), target: UNCOMMITTED });
+    const files = await workspace.diffFiles({ freshness: fresh(),
       target: UNCOMMITTED,
       maxFiles: 5000,
       ignoreWhitespace: false,
     });
-    const patches = await workspace.diffPatch({
+    const patches = await workspace.diffPatch({ freshness: fresh(),
       target: UNCOMMITTED,
       paths: ["staged.txt", "untracked.txt"],
       maxBytesPerFile: 64 * 1024,
@@ -184,8 +197,8 @@ describe("Workspace.diffFiles", () => {
     await fs.rm(path.join(repoPath, "remove.txt"));
     await runGit(["add", "added.txt"], { cwd: repoPath });
 
-    const workspace = new Workspace(repoPath);
-    const result = await workspace.diffFiles({
+    const workspace = new WorkspaceReads(repoPath, tmpdir());
+    const result = await workspace.diffFiles({ freshness: fresh(),
       target: UNCOMMITTED,
       maxFiles: 5000,
       ignoreWhitespace: false,
@@ -227,8 +240,8 @@ describe("Workspace.diffFiles", () => {
     await runGit(["mv", "original.txt", "renamed.txt"], { cwd: repoPath });
     await commitAll(repoPath, "rename");
 
-    const workspace = new Workspace(repoPath);
-    const result = await workspace.diffFiles({
+    const workspace = new WorkspaceReads(repoPath, tmpdir());
+    const result = await workspace.diffFiles({ freshness: fresh(),
       target: { type: "commit", sha: "HEAD" },
       maxFiles: 5000,
       ignoreWhitespace: false,
@@ -250,8 +263,8 @@ describe("Workspace.diffFiles", () => {
     await fs.rm(path.join(repoPath, "thing"));
     await fs.symlink("target.txt", path.join(repoPath, "thing"));
 
-    const workspace = new Workspace(repoPath);
-    const result = await workspace.diffFiles({
+    const workspace = new WorkspaceReads(repoPath, tmpdir());
+    const result = await workspace.diffFiles({ freshness: fresh(),
       target: UNCOMMITTED,
       maxFiles: 5000,
       ignoreWhitespace: false,
@@ -274,8 +287,8 @@ describe("Workspace.diffFiles", () => {
       Buffer.from([0, 1, 2, 0, 255, 254, 0, 10, 0]),
     );
 
-    const workspace = new Workspace(repoPath);
-    const result = await workspace.diffFiles({
+    const workspace = new WorkspaceReads(repoPath, tmpdir());
+    const result = await workspace.diffFiles({ freshness: fresh(),
       target: UNCOMMITTED,
       maxFiles: 5000,
       ignoreWhitespace: false,
@@ -298,8 +311,8 @@ describe("Workspace.diffFiles", () => {
     await write(repoPath, "tracked.txt", "one\ntwo\n");
     await write(repoPath, "untracked.txt", "fresh\ncontent\n");
 
-    const workspace = new Workspace(repoPath);
-    const result = await workspace.diffFiles({
+    const workspace = new WorkspaceReads(repoPath, tmpdir());
+    const result = await workspace.diffFiles({ freshness: fresh(),
       target: UNCOMMITTED,
       maxFiles: 5000,
       ignoreWhitespace: false,
@@ -330,22 +343,22 @@ describe("Workspace.diffFiles", () => {
     await runGit(["sparse-checkout", "init", "--cone"], { cwd: repoPath });
     await runGit(["sparse-checkout", "set", "inside"], { cwd: repoPath });
     await write(repoPath, "outside/new.txt", "outside\ncone\n");
-    const workspace = new Workspace(repoPath);
+    const workspace = new WorkspaceReads(repoPath, tmpdir());
     const statusBefore = await runGit(["status", "--porcelain=v1"], {
       cwd: repoPath,
     });
 
     const [diff, files, patches] = await Promise.all([
-      workspace.getDiff({
+      workspace.getDiff({ ...UNLIMITED_DIFF, freshness: fresh(),
         target: UNCOMMITTED,
         maxUntrackedFiles: 500,
       }),
-      workspace.diffFiles({
+      workspace.diffFiles({ freshness: fresh(),
         target: UNCOMMITTED,
         maxFiles: 500,
         ignoreWhitespace: false,
       }),
-      workspace.diffPatch({
+      workspace.diffPatch({ freshness: fresh(),
         target: UNCOMMITTED,
         paths: ["outside/new.txt"],
         maxBytesPerFile: 64 * 1024,
@@ -377,7 +390,7 @@ describe("Workspace.diffFiles", () => {
       repoPath,
       "gone.txt",
       () =>
-        new Workspace(repoPath).diffFiles({
+        new WorkspaceReads(repoPath, tmpdir()).diffFiles({ freshness: fresh(),
           target: UNCOMMITTED,
           maxFiles: 500,
           ignoreWhitespace: false,
@@ -406,7 +419,7 @@ describe("Workspace.diffFiles", () => {
       write(repoPath, "three.txt", "three\n"),
     ]);
 
-    const result = await new Workspace(repoPath).diffFiles({
+    const result = await new WorkspaceReads(repoPath, tmpdir()).diffFiles({ freshness: fresh(),
       target: UNCOMMITTED,
       maxFiles: 2,
       ignoreWhitespace: false,
@@ -433,7 +446,7 @@ describe("Workspace.diffFiles", () => {
       await write(repoPath, `tracked-${index}.txt`, `changed ${index}\n`);
     }
 
-    const result = await new Workspace(repoPath).diffFiles({
+    const result = await new WorkspaceReads(repoPath, tmpdir()).diffFiles({ freshness: fresh(),
       target: UNCOMMITTED,
       maxFiles: 2,
       ignoreWhitespace: false,
@@ -463,7 +476,7 @@ describe("Workspace.diffFiles", () => {
     await write(repoPath, "b.txt", "after\n");
     await write(repoPath, "c.txt", "after\n");
 
-    const result = await new Workspace(repoPath).diffFiles({
+    const result = await new WorkspaceReads(repoPath, tmpdir()).diffFiles({ freshness: fresh(),
       target: UNCOMMITTED,
       maxFiles: 2,
       ignoreWhitespace: false,
@@ -512,7 +525,7 @@ describe("Workspace.diffFiles", () => {
     }
     await runGit(["add", "-A"], { cwd: repoPath });
 
-    const result = await new Workspace(repoPath).diffFiles({
+    const result = await new WorkspaceReads(repoPath, tmpdir()).diffFiles({ freshness: fresh(),
       target: UNCOMMITTED,
       maxFiles: 10,
       ignoreWhitespace: false,
@@ -546,8 +559,8 @@ describe("Workspace.diffFiles", () => {
     await commitAll(repoPath, "second");
     await write(repoPath, "untracked.txt", "loose\n");
 
-    const workspace = new Workspace(repoPath);
-    const result = await workspace.diffFiles({
+    const workspace = new WorkspaceReads(repoPath, tmpdir());
+    const result = await workspace.diffFiles({ freshness: fresh(),
       target: { type: "commit", sha: "HEAD" },
       maxFiles: 5000,
       ignoreWhitespace: false,
@@ -572,13 +585,13 @@ describe("Workspace.diffPatch", () => {
     await write(repoPath, "alpha.txt", "1\nTWO\n3\n4\n");
     await write(repoPath, "beta.txt", "x\nY\n");
 
-    const workspace = new Workspace(repoPath);
+    const workspace = new WorkspaceReads(repoPath, tmpdir());
     const expected = await fullDiffSectionFor(
       workspace,
       UNCOMMITTED,
       "alpha.txt",
     );
-    const patches = await workspace.diffPatch({
+    const patches = await workspace.diffPatch({ freshness: fresh(),
       target: UNCOMMITTED,
       paths: ["alpha.txt"],
       maxBytesPerFile: BIG_BUDGET,
@@ -611,12 +624,12 @@ describe("Workspace.diffPatch", () => {
     );
     await write(repoPath, "alpha.txt", "1\nTWO\n3\n");
 
-    const workspace = new Workspace(repoPath);
+    const workspace = new WorkspaceReads(repoPath, tmpdir());
     const perFileBinary = await runGit(
       ["diff", "--no-ext-diff", "--binary", "-M", "HEAD", "--", "logo.png"],
       { cwd: repoPath },
     );
-    const patches = await workspace.diffPatch({
+    const patches = await workspace.diffPatch({ freshness: fresh(),
       target: UNCOMMITTED,
       paths: ["logo.png", "alpha.txt"],
       maxBytesPerFile: BIG_BUDGET,
@@ -639,8 +652,8 @@ describe("Workspace.diffPatch", () => {
     const untrackedPath = "odd [name] file.txt";
     await write(repoPath, untrackedPath, "new\nfile\nhere\n");
 
-    const workspace = new Workspace(repoPath);
-    const patches = await workspace.diffPatch({
+    const workspace = new WorkspaceReads(repoPath, tmpdir());
+    const patches = await workspace.diffPatch({ freshness: fresh(),
       target: UNCOMMITTED,
       paths: [untrackedPath],
       maxBytesPerFile: BIG_BUDGET,
@@ -668,7 +681,7 @@ describe("Workspace.diffPatch", () => {
       repoPath,
       "gone.txt",
       () =>
-        new Workspace(repoPath).diffPatch({
+        new WorkspaceReads(repoPath, tmpdir()).diffPatch({ freshness: fresh(),
           target: UNCOMMITTED,
           paths: ["gone.txt", "keep.txt"],
           maxBytesPerFile: BIG_BUDGET,
@@ -692,13 +705,13 @@ describe("Workspace.diffPatch", () => {
     await commitAll(repoPath, "base");
     await write(repoPath, "untracked.txt", "alpha\nbeta\n");
 
-    const workspace = new Workspace(repoPath);
+    const workspace = new WorkspaceReads(repoPath, tmpdir());
     const expected = await fullDiffSectionFor(
       workspace,
       UNCOMMITTED,
       "untracked.txt",
     );
-    const patches = await workspace.diffPatch({
+    const patches = await workspace.diffPatch({ freshness: fresh(),
       target: UNCOMMITTED,
       paths: ["untracked.txt"],
       maxBytesPerFile: BIG_BUDGET,
@@ -717,8 +730,8 @@ describe("Workspace.diffPatch", () => {
     await write(repoPath, "tracked.txt", "1\n2\n3\n");
     await write(repoPath, "untracked.txt", "loose\n");
 
-    const workspace = new Workspace(repoPath);
-    const patches = await workspace.diffPatch({
+    const workspace = new WorkspaceReads(repoPath, tmpdir());
+    const patches = await workspace.diffPatch({ freshness: fresh(),
       target: UNCOMMITTED,
       paths: ["untracked.txt", "tracked.txt"],
       maxBytesPerFile: BIG_BUDGET,
@@ -743,9 +756,9 @@ describe("Workspace.diffPatch", () => {
     const longLine = "x".repeat(400 * 1024);
     await write(repoPath, "huge.txt", `${longLine}\n`);
 
-    const workspace = new Workspace(repoPath);
+    const workspace = new WorkspaceReads(repoPath, tmpdir());
     const budget = 16 * 1024;
-    const patches = await workspace.diffPatch({
+    const patches = await workspace.diffPatch({ freshness: fresh(),
       target: UNCOMMITTED,
       paths: ["huge.txt"],
       maxBytesPerFile: budget,
@@ -779,9 +792,9 @@ describe("Workspace.diffPatch", () => {
       paths.push(relativePath);
     }
 
-    const workspace = new Workspace(repoPath);
+    const workspace = new WorkspaceReads(repoPath, tmpdir());
     const budget = 64 * 1024;
-    const patches = await workspace.diffPatch({
+    const patches = await workspace.diffPatch({ freshness: fresh(),
       target: UNCOMMITTED,
       paths,
       maxBytesPerFile: budget,
@@ -814,7 +827,7 @@ describe("Workspace.diffPatch", () => {
       type: "branch_committed",
       mergeBaseBranch: "main",
     };
-    const workspace = new Workspace(repoPath);
+    const workspace = new WorkspaceReads(repoPath, tmpdir());
 
     const expectedRename = await fullDiffSectionFor(
       workspace,
@@ -823,7 +836,7 @@ describe("Workspace.diffPatch", () => {
     );
     const expectedMod = await fullDiffSectionFor(workspace, target, "mod.txt");
 
-    const patches = await workspace.diffPatch({
+    const patches = await workspace.diffPatch({ freshness: fresh(),
       target,
       paths: ["after.txt", "mod.txt"],
       maxBytesPerFile: BIG_BUDGET,
@@ -844,8 +857,8 @@ describe("Workspace.diffPatch", () => {
     await commitAll(repoPath, "base");
     await write(repoPath, "real.txt", "a\nb\n");
 
-    const workspace = new Workspace(repoPath);
-    const patches = await workspace.diffPatch({
+    const workspace = new WorkspaceReads(repoPath, tmpdir());
+    const patches = await workspace.diffPatch({ freshness: fresh(),
       target: UNCOMMITTED,
       paths: ["real.txt", "does-not-exist.txt"],
       maxBytesPerFile: 10_000_000,
@@ -882,14 +895,14 @@ describe("Workspace.diffPatch", () => {
     await commitAll(repoPath, "rename with edit");
 
     const target: WorkspaceDiffTarget = { type: "commit", sha: "HEAD" };
-    const workspace = new Workspace(repoPath);
+    const workspace = new WorkspaceReads(repoPath, tmpdir());
 
     const expected = await fullDiffSectionFor(
       workspace,
       target,
       "new name.txt",
     );
-    const patches = await workspace.diffPatch({
+    const patches = await workspace.diffPatch({ freshness: fresh(),
       target,
       paths: ["new name.txt"],
       maxBytesPerFile: BIG_BUDGET,
@@ -916,7 +929,7 @@ describe("Workspace.diffPatch", () => {
     await write(repoPath, "my file.txt", "alpha\nBETA\ngamma\ndelta\n");
     await write(repoPath, "normal.txt", "one\nTWO\nthree\nfour\n");
 
-    const workspace = new Workspace(repoPath);
+    const workspace = new WorkspaceReads(repoPath, tmpdir());
     const expectedSpace = await fullDiffSectionFor(
       workspace,
       UNCOMMITTED,
@@ -928,7 +941,7 @@ describe("Workspace.diffPatch", () => {
       "normal.txt",
     );
 
-    const patches = await workspace.diffPatch({
+    const patches = await workspace.diffPatch({ freshness: fresh(),
       target: UNCOMMITTED,
       paths: ["my file.txt", "normal.txt"],
       maxBytesPerFile: BIG_BUDGET,
@@ -973,7 +986,7 @@ describe("Workspace.diffPatch", () => {
     await commitAll(repoPath, "rename with edit plus a plain edit");
 
     const target: WorkspaceDiffTarget = { type: "commit", sha: "HEAD" };
-    const workspace = new Workspace(repoPath);
+    const workspace = new WorkspaceReads(repoPath, tmpdir());
 
     const expectedRename = await fullDiffSectionFor(
       workspace,
@@ -986,7 +999,7 @@ describe("Workspace.diffPatch", () => {
       "edit.txt",
     );
 
-    const patches = await workspace.diffPatch({
+    const patches = await workspace.diffPatch({ freshness: fresh(),
       target,
       paths: ["after.txt", "edit.txt"],
       maxBytesPerFile: BIG_BUDGET,
@@ -1017,8 +1030,8 @@ describe("Workspace.diffPatch", () => {
 
     await write(repoPath, "café.txt", "un\nDEUX\ntrois\nquatre\n");
 
-    const workspace = new Workspace(repoPath);
-    const patches = await workspace.diffPatch({
+    const workspace = new WorkspaceReads(repoPath, tmpdir());
+    const patches = await workspace.diffPatch({ freshness: fresh(),
       target: UNCOMMITTED,
       paths: ["café.txt"],
       maxBytesPerFile: BIG_BUDGET,
@@ -1043,8 +1056,8 @@ describe("Workspace.diffPatch", () => {
     const multibyteBody = `${"中".repeat(200)}\n`;
     await write(repoPath, "multibyte.txt", multibyteBody);
 
-    const workspace = new Workspace(repoPath);
-    const [full] = await workspace.diffPatch({
+    const workspace = new WorkspaceReads(repoPath, tmpdir());
+    const [full] = await workspace.diffPatch({ freshness: fresh(),
       target: UNCOMMITTED,
       paths: ["multibyte.txt"],
       maxBytesPerFile: BIG_BUDGET,
@@ -1056,7 +1069,7 @@ describe("Workspace.diffPatch", () => {
     expect(leadOffset).toBeGreaterThan(0);
 
     for (const maxBytes of [leadOffset, leadOffset + 1, leadOffset + 2]) {
-      const [entry] = await workspace.diffPatch({
+      const [entry] = await workspace.diffPatch({ freshness: fresh(),
         target: UNCOMMITTED,
         paths: ["multibyte.txt"],
         maxBytesPerFile: maxBytes,
@@ -1088,9 +1101,9 @@ describe("Workspace diff ignoreWhitespace", () => {
     await write(repoPath, "b.txt", "one changed\n");
     await write(repoPath, "c.txt", "two changed\n");
     await write(repoPath, "new.txt", "fresh\n");
-    const workspace = new Workspace(repoPath);
+    const workspace = new WorkspaceReads(repoPath, tmpdir());
 
-    const listed = await workspace.diffFiles({
+    const listed = await workspace.diffFiles({ freshness: fresh(),
       target: UNCOMMITTED,
       maxFiles: 50,
       ignoreWhitespace: true,
@@ -1104,7 +1117,7 @@ describe("Workspace diff ignoreWhitespace", () => {
       deletions: 1,
     });
 
-    const patches = await workspace.diffPatch({
+    const patches = await workspace.diffPatch({ freshness: fresh(),
       target: UNCOMMITTED,
       paths: ["a.txt", "b.txt", "c.txt", "new.txt"],
       maxBytesPerFile: 64 * 1024,
@@ -1117,7 +1130,7 @@ describe("Workspace diff ignoreWhitespace", () => {
     expect(byPath.get("c.txt")).toContain("+two changed");
     expect(byPath.get("new.txt")).toContain("+fresh");
 
-    const unfiltered = await workspace.diffPatch({
+    const unfiltered = await workspace.diffPatch({ freshness: fresh(),
       target: UNCOMMITTED,
       paths: ["a.txt"],
       maxBytesPerFile: 64 * 1024,
@@ -1137,9 +1150,9 @@ describe("Workspace diff ignoreWhitespace", () => {
     const sha = (
       await runGit(["rev-parse", "HEAD"], { cwd: repoPath })
     ).stdout.trim();
-    const workspace = new Workspace(repoPath);
+    const workspace = new WorkspaceReads(repoPath, tmpdir());
 
-    const patches = await workspace.diffPatch({
+    const patches = await workspace.diffPatch({ freshness: fresh(),
       target: { type: "commit", sha },
       paths: ["a.txt", "b.txt"],
       maxBytesPerFile: 64 * 1024,
@@ -1154,11 +1167,11 @@ describe("Workspace diff ignoreWhitespace", () => {
 
 describe("Workspace diff revisions", () => {
   async function revisionOf(
-    workspace: Workspace,
+    workspace: WorkspaceReads,
     filePath: string,
     target: WorkspaceDiffTarget = UNCOMMITTED,
   ): Promise<string | undefined> {
-    const listed = await workspace.diffFiles({
+    const listed = await workspace.diffFiles({ freshness: fresh(),
       target,
       maxFiles: 50,
       ignoreWhitespace: false,
@@ -1177,7 +1190,7 @@ describe("Workspace diff revisions", () => {
     await write(repoPath, "a.txt", "base\n");
     await commitAll(repoPath, "base");
     await write(repoPath, "a.txt", "one!\n");
-    const workspace = new Workspace(repoPath);
+    const workspace = new WorkspaceReads(repoPath, tmpdir());
     const original = await revisionOf(workspace, "a.txt");
     const stat = await fs.stat(path.join(repoPath, "a.txt"));
     await write(repoPath, "replacement", "two!\n");
@@ -1205,7 +1218,7 @@ describe("Workspace diff revisions", () => {
     await commitAll(repoPath, "base");
     const baseBlob = await blobOf(repoPath, "HEAD:a.txt");
     await write(repoPath, "a.txt", "two\n");
-    const workspace = new Workspace(repoPath);
+    const workspace = new WorkspaceReads(repoPath, tmpdir());
 
     const unstaged = await revisionOf(workspace, "a.txt");
     const worktreeBlob = (
@@ -1237,8 +1250,8 @@ describe("Workspace diff revisions", () => {
     await fs.rm(path.join(repoPath, "gone.txt"));
     await write(repoPath, "fresh.txt", "hello\n");
     await fs.symlink("fresh.txt", path.join(repoPath, "link"));
-    const workspace = new Workspace(repoPath);
-    const listed = await workspace.diffFiles({
+    const workspace = new WorkspaceReads(repoPath, tmpdir());
+    const listed = await workspace.diffFiles({ freshness: fresh(),
       target: UNCOMMITTED,
       maxFiles: 50,
       ignoreWhitespace: false,
