@@ -102,17 +102,18 @@ export const diffPatchEntrySchema = z
   .strict();
 export type DiffPatchEntry = z.infer<typeof diffPatchEntrySchema>;
 
+const gitFilesSchema = z
+  .object({
+    files: z.array(diffFileEntrySchema),
+    truncated: z.boolean(),
+    shortstat: z.string(),
+    mergeBaseRef: z.string().nullable(),
+    initialPatches: z.array(diffPatchEntrySchema),
+  })
+  .strict();
+
 export const gitFilesResultSchema = z.discriminatedUnion("outcome", [
-  z
-    .object({
-      outcome: z.literal("available"),
-      files: z.array(diffFileEntrySchema),
-      truncated: z.boolean(),
-      shortstat: z.string(),
-      mergeBaseRef: z.string().nullable(),
-      initialPatches: z.array(diffPatchEntrySchema),
-    })
-    .strict(),
+  gitFilesSchema.extend({ outcome: z.literal("available") }),
   notApplicableSchema,
   unavailableSchema,
 ]);
@@ -177,37 +178,19 @@ export type GitDiffTabTarget = z.infer<typeof gitDiffTabTargetSchema>;
 
 const diffFileSideSchema = z.enum(["old", "new"]);
 
+const fileSideShape = { path: z.string().min(1), side: diffFileSideSchema };
+
 export const gitFileSideQuerySchema = z.discriminatedUnion("target", [
+  z.object({ target: z.literal("uncommitted"), ...fileSideShape }).strict(),
   z
     .object({
-      target: z.literal("uncommitted"),
-      path: z.string().min(1),
-      side: diffFileSideSchema,
-    })
-    .strict(),
-  z
-    .object({
-      target: z.literal("branch_committed"),
+      target: z.enum(["branch_committed", "all"]),
       mergeBaseRef: gitObjectIdSchema,
-      path: z.string().min(1),
-      side: diffFileSideSchema,
+      ...fileSideShape,
     })
     .strict(),
   z
-    .object({
-      target: z.literal("all"),
-      mergeBaseRef: gitObjectIdSchema,
-      path: z.string().min(1),
-      side: diffFileSideSchema,
-    })
-    .strict(),
-  z
-    .object({
-      target: z.literal("commit"),
-      sha: gitObjectIdSchema,
-      path: z.string().min(1),
-      side: diffFileSideSchema,
-    })
+    .object({ target: z.literal("commit"), sha: gitObjectIdSchema, ...fileSideShape })
     .strict(),
 ]);
 export type GitFileSideQuery = z.infer<typeof gitFileSideQuerySchema>;
@@ -241,20 +224,6 @@ const environmentInputSchema = z
   .object({ environmentId: z.string().min(1) })
   .strict();
 
-export const gitDiffQuerySchema = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("uncommitted") }).strict(),
-  z
-    .object({
-      type: z.literal("branch_committed"),
-      mergeBaseBranch: gitBranchNameSchema,
-    })
-    .strict(),
-  z
-    .object({ type: z.literal("all"), mergeBaseBranch: gitBranchNameSchema })
-    .strict(),
-  z.object({ type: z.literal("commit"), sha: gitObjectIdSchema }).strict(),
-]);
-
 export const gitRpcContract = defineRpcContract({
   status: {
     experimental_description:
@@ -281,7 +250,7 @@ export const gitRpcContract = defineRpcContract({
       "The unified diff, file list and shortstat for one environment and target.",
     input: environmentInputSchema
       .extend({
-        target: gitDiffQuerySchema,
+        target: workspaceDiffTargetSchema,
         maxDiffBytes: z.number().int().min(1).max(GIT_DIFF_MAX_DIFF_BYTES).optional(),
         maxFileListBytes: z
           .number()
@@ -299,7 +268,7 @@ export const gitRpcContract = defineRpcContract({
       "Changed files with per-file line counts for one environment and target, with patches for small files.",
     input: environmentInputSchema
       .extend({
-        target: gitDiffQuerySchema,
+        target: workspaceDiffTargetSchema,
         ignoreWhitespace: z.boolean(),
       })
       .strict(),
@@ -343,7 +312,7 @@ export const gitRpcContract = defineRpcContract({
       "Files marked Viewed for an environment and diff target.",
     input: environmentInputSchema
       .extend({
-        target: gitDiffQuerySchema,
+        target: workspaceDiffTargetSchema,
         paths: z
           .array(z.string().min(1).max(4096))
           .max(GIT_VIEWED_MAX_PATHS)
@@ -358,7 +327,7 @@ export const gitRpcContract = defineRpcContract({
       "Mark a file Viewed at a revision returned by files.",
     input: environmentInputSchema
       .extend({
-        target: gitDiffQuerySchema,
+        target: workspaceDiffTargetSchema,
         path: z.string().min(1).max(4096),
         revision: z.string().min(1).max(1024),
       })
@@ -371,7 +340,7 @@ export const gitRpcContract = defineRpcContract({
       "Clear one file's Viewed mark, or every mark for the target.",
     input: environmentInputSchema
       .extend({
-        target: gitDiffQuerySchema,
+        target: workspaceDiffTargetSchema,
         path: z.string().min(1).max(4096).optional(),
       })
       .strict(),
@@ -459,17 +428,7 @@ export const gitHostContract = defineRpcContract({
         ignoreWhitespace: z.boolean(),
       })
       .strict(),
-    output: hostReadResultSchema(
-      z
-        .object({
-          files: z.array(diffFileEntrySchema),
-          truncated: z.boolean(),
-          shortstat: z.string(),
-          mergeBaseRef: z.string().nullable(),
-          initialPatches: z.array(diffPatchEntrySchema),
-        })
-        .strict(),
-    ),
+    output: hostReadResultSchema(gitFilesSchema),
   },
   patches: {
     experimental_retryable: true,

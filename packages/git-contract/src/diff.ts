@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { gitBranchNameSchema } from "./git-checkout.js";
 
 export const gitObjectIdSchema = z.string().regex(/^[0-9a-f]{4,40}$/iu);
 
@@ -8,21 +9,17 @@ export const diffViewedFileSchema = z
 export type DiffViewedFile = z.infer<typeof diffViewedFileSchema>;
 
 export const workspaceDiffTargetSchema = z.discriminatedUnion("type", [
-  z.object({
-    type: z.literal("uncommitted"),
-  }),
-  z.object({
-    type: z.literal("branch_committed"),
-    mergeBaseBranch: z.string().min(1),
-  }),
-  z.object({
-    type: z.literal("all"),
-    mergeBaseBranch: z.string().min(1),
-  }),
-  z.object({
-    type: z.literal("commit"),
-    sha: gitObjectIdSchema,
-  }),
+  z.object({ type: z.literal("uncommitted") }).strict(),
+  z
+    .object({
+      type: z.literal("branch_committed"),
+      mergeBaseBranch: gitBranchNameSchema,
+    })
+    .strict(),
+  z
+    .object({ type: z.literal("all"), mergeBaseBranch: gitBranchNameSchema })
+    .strict(),
+  z.object({ type: z.literal("commit"), sha: gitObjectIdSchema }).strict(),
 ]);
 export type WorkspaceDiffTarget = z.infer<typeof workspaceDiffTargetSchema>;
 
