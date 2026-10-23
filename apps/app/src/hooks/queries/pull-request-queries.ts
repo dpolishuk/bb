@@ -5,7 +5,7 @@ import { useEffect, useRef } from "react";
 import {
   GITHUB_PR_STATUS_PLUGIN_ID,
   githubPrStatusRpcContract,
-  type EnvironmentPullRequests,
+  type EnvironmentPullRequest,
   type PullRequest,
 } from "bb-plugin-bb--github-pr-status/contract";
 import {
@@ -17,15 +17,13 @@ const OPEN_PULL_REQUEST_STALE_MS = 30_000;
 const SETTLED_PULL_REQUEST_STALE_MS = 60 * 60_000;
 
 export function isEnvironmentPullRequestStale(
-  row: EnvironmentPullRequests,
+  row: EnvironmentPullRequest,
   loadedAt: number,
   now: number,
 ): boolean {
   const settled =
     row.outcome === "available" &&
-    row.currentBranchUrl !== null &&
-    (row.pullRequests[0]?.state === "merged" ||
-      row.pullRequests[0]?.state === "closed");
+    (row.pullRequest.state === "merged" || row.pullRequest.state === "closed");
   return (
     now - loadedAt >
     (settled ? SETTLED_PULL_REQUEST_STALE_MS : OPEN_PULL_REQUEST_STALE_MS)
@@ -125,9 +123,7 @@ export function useEnvironmentPullRequest(
   return {
     isLoading: enabled && query.error === null && row === undefined,
     pullRequest:
-      enabled && row?.outcome === "available" && row.currentBranchUrl !== null
-        ? (row.pullRequests[0] ?? null)
-        : null,
+      enabled && row?.outcome === "available" ? row.pullRequest : null,
   };
 }
 

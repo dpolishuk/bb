@@ -144,6 +144,38 @@ describe("host GraphQL batching", () => {
     expect(await gh.readCalls()).toHaveLength(1);
   });
 
+  it("reads PRs without merge-queue state from a server that lacks the field", async () => {
+    const { isInMergeQueue: _, ...withoutQueue } = raw(3);
+    const gh = await installFakeGh({
+      "api graphql": {
+        stdout: JSON.stringify({ data: { p0: withoutQueue } }),
+        whenQueryIncludes: {
+          text: "isInMergeQueue",
+          response: {
+            exit: 1,
+            stdout: JSON.stringify({
+              errors: [
+                {
+                  message:
+                    "Field 'isInMergeQueue' doesn't exist on type 'PullRequest'",
+                },
+              ],
+            }),
+          },
+        },
+      },
+    });
+    const cwd = await makeTempDir("bb-pr-ghes-");
+    await expect(getPullRequestByUrl(raw(3).url, cwd)).resolves.toMatchObject({
+      outcome: "found",
+      pullRequest: { number: 3, inMergeQueue: null },
+    });
+    await getPullRequestByUrl(raw(4).url, cwd);
+    const queries = await gh.readQueries();
+    expect(queries).toHaveLength(3);
+    expect(queries[2]).not.toContain("isInMergeQueue");
+  });
+
   it("caps each document at 25 PRs", async () => {
     const gh = await installFakeGh({
       "api graphql": {

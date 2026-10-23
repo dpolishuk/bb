@@ -2,7 +2,7 @@
 
 import { cleanup, renderHook } from "@testing-library/react";
 import type {
-  EnvironmentPullRequests,
+  EnvironmentPullRequest,
   PullRequest,
 } from "bb-plugin-bb--github-pr-status/contract";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -13,7 +13,7 @@ import {
 
 const keyedQuery = vi.hoisted(() => ({
   pluginEnabled: true,
-  data: {} as Record<string, EnvironmentPullRequests>,
+  data: {} as Record<string, EnvironmentPullRequest>,
   refetch: vi.fn(async () => {}),
 }));
 
@@ -33,38 +33,34 @@ vi.mock("@/lib/plugin-sdk-hooks", () => ({
   experimental_useRpcMutation: () => ({ mutate: vi.fn(), isPending: false }),
 }));
 
-function row(state: PullRequest["state"]): EnvironmentPullRequests {
+function row(state: PullRequest["state"]): EnvironmentPullRequest {
   return {
     outcome: "available",
-    currentBranchUrl: "https://github.com/acme/bb/pull/7",
-    pullRequests: [
-      {
-        number: 7,
-        title: "Ship it",
-        state,
-        url: "https://github.com/acme/bb/pull/7",
-        baseRefName: "main",
-        headRefName: "bb/ship",
-        headRefOid: null,
-        updatedAt: "2026-10-22T00:00:00Z",
-        autoMerge: false,
-        inMergeQueue: false,
-        checks: {
-          state: "passing",
-          totalCount: 1,
-          passedCount: 1,
-          failedCount: 0,
-          pendingCount: 0,
-        },
-        review: { state: "none", reviewRequestCount: 0 },
-        mergeability: {
-          state: "mergeable",
-          mergeStateStatus: "CLEAN",
-          mergeable: "MERGEABLE",
-        },
-        attention: "ready_to_merge",
+    pullRequest: {
+      number: 7,
+      title: "Ship it",
+      state,
+      url: "https://github.com/acme/bb/pull/7",
+      baseRefName: "main",
+      headRefName: "bb/ship",
+      updatedAt: "2026-10-22T00:00:00Z",
+      autoMerge: false,
+      inMergeQueue: false,
+      checks: {
+        state: "passing",
+        totalCount: 1,
+        passedCount: 1,
+        failedCount: 0,
+        pendingCount: 0,
       },
-    ],
+      review: { state: "none", reviewRequestCount: 0 },
+      mergeability: {
+        state: "mergeable",
+        mergeStateStatus: "CLEAN",
+        mergeable: "MERGEABLE",
+      },
+      attention: "ready_to_merge",
+    },
   };
 }
 
@@ -112,16 +108,8 @@ describe("isEnvironmentPullRequestStale", () => {
 describe("useEnvironmentPullRequest refreshes", () => {
   it("refetches a cached row on mount and when the page shows after 30 s", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
-    const current = row("open");
-    if (current.outcome !== "available") throw new Error("Expected PR fixture");
-    current.pullRequests.push({
-      ...current.pullRequests[0]!,
-      number: 8,
-      url: "https://github.com/acme/bb/pull/8",
-    });
-    keyedQuery.data = { "env-open": current };
-    const { result } = renderHook(() => useEnvironmentPullRequest("env-open"));
-    expect(result.current.pullRequest?.number).toBe(7);
+    keyedQuery.data = { "env-open": row("open") };
+    renderHook(() => useEnvironmentPullRequest("env-open"));
     await settle();
     expect(keyedQuery.refetch).toHaveBeenCalledTimes(1);
 
@@ -139,19 +127,6 @@ describe("useEnvironmentPullRequest refreshes", () => {
     keyedQuery.pluginEnabled = false;
     const { result } = renderHook(() =>
       useEnvironmentPullRequest("env-disabled"),
-    );
-    expect(result.current.pullRequest).toBeNull();
-    expect(result.current.isLoading).toBe(false);
-  });
-
-  it("keeps the banner absent when only previous branches have linked PRs", () => {
-    const previous = row("open");
-    if (previous.outcome !== "available")
-      throw new Error("Expected PR fixture");
-    previous.currentBranchUrl = null;
-    keyedQuery.data = { "env-previous": previous };
-    const { result } = renderHook(() =>
-      useEnvironmentPullRequest("env-previous"),
     );
     expect(result.current.pullRequest).toBeNull();
     expect(result.current.isLoading).toBe(false);

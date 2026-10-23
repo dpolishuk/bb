@@ -4,7 +4,7 @@ The bundled GitHub PR Status plugin
 (`bb--github-pr-status`) owns pull request data. Copy the part of its contract you
 read; `bb plugin rpc inspect bb--github-pr-status pullRequests` prints the full
 schema. Each key is an environment id and each row is `available` with a
-a `pullRequests` list (current branch first), `absent`, or `unavailable` (the machine is offline or `gh`
+`pullRequest`, `absent`, or `unavailable` (the machine is offline or `gh`
 failed). Treat a query error, `absent` and `unavailable` as nothing to show.
 While a row is on screen the plugin re-checks it and refreshes it only when it
 changes.
@@ -22,19 +22,14 @@ const githubPrStatus = defineRpcContract({
       z.discriminatedUnion("outcome", [
         z.object({
           outcome: z.literal("available"),
-          currentBranchUrl: z.string().nullable(),
-          pullRequests: z
-            .array(
-              z.object({
-                number: z.number(),
-                title: z.string(),
-                url: z.string(),
-                state: z.enum(["draft", "open", "merged", "closed"]),
-                attention: z.string(),
-                checks: z.object({ state: z.string() }),
-              }),
-            )
-            .min(1),
+          pullRequest: z.object({
+            number: z.number(),
+            title: z.string(),
+            url: z.string(),
+            state: z.enum(["draft", "open", "merged", "closed"]),
+            attention: z.string(),
+            checks: z.object({ state: z.string() }),
+          }),
         }),
         z.object({ outcome: z.literal("absent") }),
         z.object({ outcome: z.literal("unavailable"), message: z.string() }),
@@ -52,9 +47,7 @@ function useRowPullRequest(thread: PluginSidebarThread) {
     keys: environmentId ? [environmentId] : [],
   });
   const row = environmentId ? data?.[environmentId] : undefined;
-  return row?.outcome === "available" && row.currentBranchUrl !== null
-    ? (row.pullRequests[0] ?? null)
-    : null;
+  return row?.outcome === "available" ? row.pullRequest : null;
 }
 ```
 

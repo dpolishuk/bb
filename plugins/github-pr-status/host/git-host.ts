@@ -672,32 +672,120 @@ async function getPullRequestTarget(
   };
 }
 
+const GH_REMOTE_PRIORITY: Readonly<Record<string, number>> = {
+  upstream: 3,
+  github: 2,
+  origin: 1,
+};
+
+function parseGhRepoOverride(value: string): GitRemoteRepository | null {
+  const segments = value.trim().split("/");
+  if (segments.length === 2)
+    return parseGitRemoteRepository(`https://github.com/${segments.join("/")}`);
+  if (segments.length === 3)
+    return parseGitRemoteRepository(`https://${segments.join("/")}`);
+  return null;
+}
+
+async function resolveBranchReadTarget(
+  args: Pick<GetPullRequestForCurrentBranchArgs, "cwd" | "localBranch">,
+  target: Exclude<PullRequestTargetLookup, { outcome: "unavailable" }>,
+): Promise<Extract<ReadTarget, { kind: "branch" }> | null> {
+  const branchKey = `branch.${args.localBranch}`;
+  const escapedBranch = escapeGitConfigRegexp(args.localBranch);
+  const configResult = await runGit(
+    [
+      "config",
+      "--null",
+      "--get-regexp",
+      `^(branch\\.${escapedBranch}\\.(remote|pushremote)|remote\\.pushdefault|remote\\..*\\.(url|gh-resolved))$`,
+    ],
+    {
+      cwd: args.cwd,
+      allowFailure: true,
+      timeoutMs: GIT_UPSTREAM_LOOKUP_TIMEOUT_MS,
+    },
+  );
+  const config = parseNullTerminatedGitConfig(configResult.stdout);
+  const remotes: {
+    name: string;
+    repository: GitRemoteRepository;
+    resolved: string | null;
+  }[] = [];
+  for (const [key, value] of config) {
+    if (!key.startsWith("remote.") || !key.endsWith(".url")) continue;
+    const name = key.slice("remote.".length, -".url".length);
+    const repository = parseGitRemoteRepository(value);
+    if (repository === null) continue;
+    remotes.push({
+      name,
+      repository,
+      resolved: config.get(`remote.${name}.gh-resolved`) ?? null,
+    });
+  }
+  const resolved = remotes.find((remote) => remote.resolved !== null);
+  const base = process.env.GH_REPO
+    ? parseGhRepoOverride(process.env.GH_REPO)
+    : resolved !== undefined && resolved.resolved !== "base"
+      ? parseGitRemoteRepository(
+          `https://${resolved.repository.host}/${resolved.resolved}`,
+        )
+      : (resolved?.repository ??
+        [...remotes].sort(
+          (a, b) =>
+            (GH_REMOTE_PRIORITY[b.name] ?? 0) -
+            (GH_REMOTE_PRIORITY[a.name] ?? 0),
+        )[0]?.repository ??
+        null);
+  if (base === null) return null;
+  const sameOwner = (owner: string) =>
+    owner.toLowerCase() === base.owner.toLowerCase();
+  if (target.outcome === "upstream-branch") {
+    const separator = target.selector.indexOf(":");
+    const owner = target.selector.slice(0, separator);
+    return {
+      kind: "branch",
+      host: base.host,
+      owner: base.owner,
+      repository: base.repository,
+      branch: target.selector.slice(separator + 1),
+      headOwner: sameOwner(owner) ? null : owner,
+    };
+  }
+  const pushRemote =
+    config.get(`${branchKey}.pushremote`) ??
+    config.get("remote.pushdefault") ??
+    config.get(`${branchKey}.remote`) ??
+    "";
+  const pushRepository =
+    remotes.find((remote) => remote.name === pushRemote)?.repository ??
+    parseGitRemoteRepository(pushRemote);
+  return {
+    kind: "branch",
+    host: base.host,
+    owner: base.owner,
+    repository: base.repository,
+    branch: args.localBranch,
+    headOwner:
+      pushRepository === null || sameOwner(pushRepository.owner)
+        ? null
+        : pushRepository.owner,
+  };
+}
+
 export async function getPullRequestForCurrentBranch(
   args: GetPullRequestForCurrentBranchArgs,
 ): Promise<HostPullRequestLookup> {
   const target = await getPullRequestTarget(args);
   if (target.outcome === "unavailable") return target;
-  const remote = await runGit(["remote", "get-url", "origin"], {
-    cwd: args.cwd,
-    allowFailure: true,
-  });
-  const repository = parseGitRemoteRepository(remote.stdout);
-  if (repository !== null) {
-    const selector =
-      target.outcome === "upstream-branch" ? target.selector : args.localBranch;
-    const separator = selector.indexOf(":");
+  const branchTarget = await resolveBranchReadTarget(args, target);
+  if (branchTarget !== null)
     return enqueueRead(
-      {
-        kind: "branch",
-        ...repository,
-        branch: separator === -1 ? selector : selector.slice(separator + 1),
-        headOwner: separator === -1 ? null : selector.slice(0, separator),
-      },
+      branchTarget,
       args.cwd,
       sanitizeInheritedChildProcessEnv({ env: process.env }),
       args.refresh,
     );
-  }
   const ghArgs = [
     "pr",
     "view",
@@ -776,6 +864,7 @@ const discovered = new Map<
   { result: HostPullRequestLookup; fetchedAt: number }
 >();
 const pausedUntil = new Map<string, number>();
+const mergeQueueUnsupported = new Set<string>();
 
 async function credentialKey(
   host: string,
@@ -809,10 +898,10 @@ async function credentialKey(
     .digest("hex");
 }
 
-function fields(cursor: string | null): string {
-  return `number title state url isDraft autoMergeRequest { enabledAt } isInMergeQueue
+function fields(cursor: string | null, mergeQueue: boolean): string {
+  return `number title state url isDraft autoMergeRequest { enabledAt }${mergeQueue ? " isInMergeQueue" : ""}
     baseRefName headRefName headRefOid updatedAt reviewDecision reviewRequests(first: 100) { totalCount }
-    mergeStateStatus mergeable headRepositoryOwner { login }
+    mergeStateStatus mergeable isCrossRepository headRepositoryOwner { login }
     commits(last: 1) { nodes { commit { statusCheckRollup { contexts(first: 100${cursor === null ? "" : `, after: ${JSON.stringify(cursor)}`}) {
       nodes { ... on CheckRun { name status conclusion detailsUrl startedAt }
         ... on StatusContext { context state targetUrl createdAt } }
@@ -820,15 +909,39 @@ function fields(cursor: string | null): string {
     } } } } }`;
 }
 
-function selection(target: ReadTarget, alias: string): string {
+function selection(
+  target: ReadTarget,
+  alias: string,
+  mergeQueue: boolean,
+): string {
   if (target.kind === "url")
-    return `${alias}: resource(url: ${JSON.stringify(target.url)}) { ... on PullRequest { ${fields(target.cursor)} } }`;
+    return `${alias}: resource(url: ${JSON.stringify(target.url)}) { ... on PullRequest { ${fields(target.cursor, mergeQueue)} } }`;
   return `${alias}: repository(owner: ${JSON.stringify(target.owner)}, name: ${JSON.stringify(target.repository)}) {
-    pullRequests(headRefName: ${JSON.stringify(target.branch)}, first: 100, orderBy: {field: UPDATED_AT, direction: DESC}) {
-      nodes { ${fields(null)} }
-      pageInfo { hasNextPage }
+    defaultBranchRef { name }
+    pullRequests(headRefName: ${JSON.stringify(target.branch)}, first: 100, orderBy: {field: CREATED_AT, direction: DESC}) {
+      nodes { ${fields(null, mergeQueue)} }
     }
   }`;
+}
+
+function matchesBranchTarget(
+  pr: JsonObject,
+  target: Extract<ReadTarget, { kind: "branch" }>,
+  defaultBranch: string | null,
+): boolean {
+  const crossRepository = getBoolean(pr, "isCrossRepository") === true;
+  if (target.headOwner === null)
+    return (
+      !crossRepository &&
+      (pr.state === "OPEN" || target.branch !== defaultBranch)
+    );
+  return (
+    crossRepository &&
+    getString(
+      asObject(pr.headRepositoryOwner) ?? {},
+      "login",
+    )?.toLowerCase() === target.headOwner.toLowerCase()
+  );
 }
 
 async function decodeRead(
@@ -838,26 +951,18 @@ async function decodeRead(
   let raw = asObject(value);
   if (raw === null) return { outcome: "none" };
   if (entry.target.kind === "branch") {
+    const target = entry.target;
     const connection = asObject(raw.pullRequests);
-    if (asObject(connection?.pageInfo)?.hasNextPage === true)
-      return {
-        outcome: "unavailable",
-        message: "Too many pull requests match the current branch",
-      };
-    const headOwner = entry.target.headOwner;
+    const defaultBranch = getString(
+      asObject(raw.defaultBranchRef) ?? {},
+      "name",
+    );
     const candidates = Array.isArray(connection?.nodes)
       ? connection.nodes.flatMap((node) => {
           const pr = asObject(node);
-          if (
-            pr === null ||
-            (headOwner !== null &&
-              getString(
-                asObject(pr.headRepositoryOwner) ?? {},
-                "login",
-              )?.toLowerCase() !== headOwner.toLowerCase())
-          )
-            return [];
-          return [pr];
+          return pr !== null && matchesBranchTarget(pr, target, defaultBranch)
+            ? [pr]
+            : [];
         })
       : [];
     raw = candidates.find((pr) => pr.state === "OPEN") ?? candidates[0] ?? null;
@@ -876,7 +981,10 @@ async function decodeRead(
       outcome: "unavailable",
       message: "GitHub returned an invalid pull request",
     };
-  view.inMergeQueue = getBoolean(raw, "isInMergeQueue");
+  view.inMergeQueue =
+    view.isDraft || view.state !== "OPEN"
+      ? false
+      : getBoolean(raw, "isInMergeQueue");
   const pageInfo = asObject(contexts?.pageInfo);
   if (pageInfo?.hasNextPage === true) {
     const cursor = getString(pageInfo, "endCursor");
@@ -936,13 +1044,40 @@ async function runGraphQLRead(
   }
 }
 
+async function requestBatch(
+  entries: QueuedRead[],
+  mergeQueue: boolean,
+): Promise<{ data: JsonObject | null; errors: JsonObject[] }> {
+  const query = `query { ${entries.map((entry, index) => selection(entry.target, `p${index}`, mergeQueue)).join("\n")} rateLimit { remaining resetAt } }`;
+  const { stdout } = await runGraphQLRead(query, entries[0]!).catch(
+    (error: unknown) => {
+      if (
+        error instanceof GhCommandError &&
+        error.reason === "failed" &&
+        error.stdout.trim().startsWith("{")
+      )
+        return { stdout: error.stdout };
+      throw error;
+    },
+  );
+  const response = asObject(JSON.parse(stdout));
+  return {
+    data: asObject(response?.data),
+    errors: Array.isArray(response?.errors)
+      ? response.errors.flatMap((error) => {
+          const object = asObject(error);
+          return object === null ? [] : [object];
+        })
+      : [],
+  };
+}
+
 async function flushBatch(group: string): Promise<void> {
   const queued = batches.get(group);
   if (queued === undefined) return;
   batches.delete(group);
   for (let offset = 0; offset < queued.length; offset += 25) {
     const entries = queued.slice(offset, offset + 25);
-    const first = entries[0]!;
     const paused = pausedUntil.get(group) ?? 0;
     if (paused > Date.now()) {
       for (const entry of entries)
@@ -953,26 +1088,19 @@ async function flushBatch(group: string): Promise<void> {
       continue;
     }
     try {
-      const query = `query { ${entries.map((entry, index) => selection(entry.target, `p${index}`)).join("\n")} rateLimit { remaining resetAt } }`;
-      const { stdout } = await runGraphQLRead(query, first).catch(
-        (error: unknown) => {
-          if (
-            error instanceof GhCommandError &&
-            error.reason === "failed" &&
-            error.stdout.trim().startsWith("{")
-          )
-            return { stdout: error.stdout };
-          throw error;
-        },
+      let { data, errors } = await requestBatch(
+        entries,
+        !mergeQueueUnsupported.has(group),
       );
-      const response = asObject(JSON.parse(stdout));
-      const data = asObject(response?.data);
-      const errors = Array.isArray(response?.errors)
-        ? response.errors.flatMap((error) => {
-            const object = asObject(error);
-            return object === null ? [] : [object];
-          })
-        : [];
+      if (
+        !mergeQueueUnsupported.has(group) &&
+        errors.some((error) =>
+          /isInMergeQueue/u.test(getString(error, "message") ?? ""),
+        )
+      ) {
+        mergeQueueUnsupported.add(group);
+        ({ data, errors } = await requestBatch(entries, false));
+      }
       if (
         errors.some((error) =>
           /rate limit|secondary rate|abuse detection/iu.test(

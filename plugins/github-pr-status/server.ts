@@ -11,7 +11,6 @@ import {
   githubPrStatusHostContract,
   githubPrStatusRpcContract,
   type EnvironmentPullRequest,
-  type EnvironmentPullRequests,
   type HostPullRequestAction,
   type PullRequest,
 } from "./contract.js";
@@ -106,11 +105,11 @@ function describePullRequest(pr: PullRequest): string {
 }
 
 function describeEnvironmentPullRequest(
-  result: EnvironmentPullRequests,
+  result: EnvironmentPullRequest,
 ): string {
   switch (result.outcome) {
     case "available":
-      return result.pullRequests.map(describePullRequest).join("\n\n");
+      return describePullRequest(result.pullRequest);
     case "absent":
       return "No pull request found";
     case "unavailable":
@@ -135,10 +134,9 @@ export default function githubPrStatusPlugin(bb: BbPluginApi): void {
   }
 
   const persistence = createPullRequestPersistence(bb.storage);
+  const savedLinks = persistence.links();
   const lookedUpBranches = new Map<string, string | null>(
-    persistence
-      .currentLinks()
-      .map((link) => [link.environment_id, link.branch]),
+    savedLinks.map((link) => [link.environmentId, link.branch]),
   );
   const upstreams = new Map<string, string | null>();
 
@@ -193,6 +191,15 @@ export default function githubPrStatusPlugin(bb: BbPluginApi): void {
       return { outcome: "unavailable", message: "Environment is not ready" };
     }
     try {
+      const machine = await bb.sdk.hosts.get({ hostId: environment.hostId });
+      if (
+        machine.status !== "connected" ||
+        machine.lifecycle.phase !== "active"
+      )
+        return {
+          outcome: "unavailable",
+          message: `${machine.name} isn't available. Start the machine and try again.`,
+        };
       const refs = await host.call(
         "upstream",
         { path: environment.path },
@@ -251,9 +258,7 @@ export default function githubPrStatusPlugin(bb: BbPluginApi): void {
     upstreams.delete(removal.environmentId);
   });
 
-  for (const environmentId of new Set(
-    persistence.links().map((link) => link.environmentId),
-  )) {
+  for (const { environmentId } of savedLinks) {
     void getEnvironment(environmentId)
       .then((environment) => {
         if (environment === null) store.remove(environmentId);
@@ -390,39 +395,6 @@ export default function githubPrStatusPlugin(bb: BbPluginApi): void {
     return { message: "Pull request merge started" };
   }
 
-  async function readEnvironmentPullRequests(
-    environmentId: string,
-    viewer: boolean,
-  ): Promise<EnvironmentPullRequests> {
-    try {
-      const environment = await getEnvironment(environmentId);
-      if (environment === null) {
-        store.remove(environmentId);
-        return { outcome: "absent" };
-      }
-      if (!environment.isGitRepo) return { outcome: "absent" };
-      if (environment.status !== "ready" || environment.path === null)
-        return { outcome: "unavailable", message: "Environment is not ready" };
-      const machine = await bb.sdk.hosts.get({ hostId: environment.hostId });
-      if (
-        machine.status !== "connected" ||
-        machine.lifecycle.phase !== "active"
-      )
-        return {
-          outcome: "unavailable",
-          message: `${machine.name} isn't available. Start the machine and try again.`,
-        };
-      if (
-        lookedUpBranches.has(environmentId) &&
-        lookedUpBranches.get(environmentId) !== environment.branchName
-      )
-        await inspectRefs(environmentId, false);
-      return store.read(environmentId, { viewer });
-    } catch (error) {
-      return { outcome: "unavailable", message: errorMessage(error) };
-    }
-  }
-
   bb.rpc.register(
     githubPrStatusRpcContract,
     {
@@ -430,8 +402,7 @@ export default function githubPrStatusPlugin(bb: BbPluginApi): void {
         const viewer = context.experimental_caller.kind === "client";
         const results = await Promise.all(
           keys.map(
-            async (key) =>
-              [key, await readEnvironmentPullRequests(key, viewer)] as const,
+            async (key) => [key, await store.read(key, { viewer })] as const,
           ),
         );
         return Object.fromEntries(results);
@@ -447,15 +418,12 @@ export default function githubPrStatusPlugin(bb: BbPluginApi): void {
     },
   );
 
-  bb.rpc.experimental_whileWatched(
-    "pullRequests",
-    (read, signal) => {
-      if (!("key" in read)) return;
-      store.watch(read.key, signal);
-      const release = retainEnvironmentEvents();
-      signal.addEventListener("abort", release, { once: true });
-    },
-  );
+  bb.rpc.experimental_whileWatched("pullRequests", (read, signal) => {
+    if (!("key" in read)) return;
+    store.watch(read.key, signal);
+    const release = retainEnvironmentEvents();
+    signal.addEventListener("abort", release, { once: true });
+  });
 
   async function turnRanGh(threadId: string): Promise<boolean> {
     let beforeSeq: string | undefined;
@@ -506,9 +474,9 @@ export default function githubPrStatusPlugin(bb: BbPluginApi): void {
           positionals: ENVIRONMENT_POSITIONAL,
           options: { json: JSON_OPTION },
           async run(input) {
-            const result = await readEnvironmentPullRequests(
+            const result = await store.read(
               input.positionals["environment-id"],
-              false,
+              { viewer: false },
             );
             return {
               exitCode: 0,

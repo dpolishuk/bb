@@ -32,19 +32,7 @@ describe("bb thread show command output", () => {
       urls.push(String(input));
       bodies.push(JSON.parse(String(init?.body)));
       return new Response(
-        JSON.stringify({
-          ok: true,
-          result: {
-            [environmentId]:
-              row.outcome === "available"
-                ? {
-                    outcome: "available",
-                    pullRequests: [row.pullRequest],
-                    currentBranchUrl: row.pullRequest.url,
-                  }
-                : row,
-          },
-        }),
+        JSON.stringify({ ok: true, result: { [environmentId]: row } }),
         { status: 200, headers: { "Content-Type": "application/json" } },
       );
     });
@@ -59,7 +47,6 @@ describe("bb thread show command output", () => {
       url: "https://github.com/example/bb/pull/42",
       baseRefName: "main",
       headRefName: "bb/thread-show-pr",
-      headRefOid: null,
       updatedAt: "2026-06-24T12:00:00.000Z",
       autoMerge: false,
       inMergeQueue: false,

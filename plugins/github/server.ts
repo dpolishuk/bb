@@ -354,8 +354,7 @@ const environmentPullRequestUrlsSchema = z.record(
   z.union([
     z.object({
       outcome: z.literal("available"),
-      currentBranchUrl: z.string().nullable(),
-      pullRequests: z.array(z.object({ url: z.string() })).min(1),
+      pullRequest: z.object({ url: z.string() }),
     }),
     z.object({ outcome: z.enum(["absent", "unavailable"]) }),
   ]),
@@ -1468,9 +1467,7 @@ export default async function plugin(bb: BbPluginApi) {
           });
           const result = rows[thread.environmentId];
           const url =
-            result?.outcome === "available" && result.currentBranchUrl !== null
-              ? result.pullRequests[0]!.url
-              : null;
+            result?.outcome === "available" ? result.pullRequest.url : null;
           const match =
             typeof url === "string"
               ? url.match(/github\.com\/([\w.-]+\/[\w.-]+)\/pull\/(\d+)/)

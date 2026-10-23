@@ -131,7 +131,6 @@ describe("assemblePullRequest", () => {
       state: "open",
       baseRefName: "main",
       headRefName: "bb/add-pr-section",
-      headRefOid: null,
       updatedAt: "2026-06-16T12:30:00Z",
       autoMerge: false,
       inMergeQueue: false,

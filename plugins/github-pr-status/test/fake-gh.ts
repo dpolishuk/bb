@@ -8,6 +8,7 @@ interface FakeGhResponse {
   stdout?: string;
   stderr?: string;
   exit?: number;
+  whenQueryIncludes?: { text: string; response: FakeGhResponse };
 }
 
 export async function makeTempDir(prefix: string): Promise<string> {
@@ -32,7 +33,8 @@ const inputIndex = args.indexOf("--input");
 const query = inputIndex === -1 ? null : JSON.parse(fs.readFileSync(args[inputIndex + 1], "utf8")).query;
 fs.appendFileSync(process.env.TEST_GH_LOG, JSON.stringify({args, query}) + "\\n");
 const responses = JSON.parse(process.env.TEST_GH_RESPONSES);
-const response = responses[args.slice(0, 2).join(" ")] ?? {};
+const configured = responses[args.slice(0, 2).join(" ")] ?? {};
+const response = configured.whenQueryIncludes && query?.includes(configured.whenQueryIncludes.text) ? configured.whenQueryIncludes.response : configured;
 if (response.stdout) process.stdout.write(response.stdout);
 if (response.stderr) process.stderr.write(response.stderr);
 process.exitCode = response.exit ?? 0;

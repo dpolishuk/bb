@@ -67,11 +67,13 @@ async function setup(options: {
   callHost?: (call: ExperimentalFakeHostRpcCall) => unknown;
 }) {
   const environments = options.environments ?? { "env-1": environment() };
+  const sdkCalls: string[] = [];
   const fake = createFakePluginHost({
     pluginId: "bb--github-pr-status",
     sdk: {
       environments: {
         get: async ({ environmentId }: { environmentId: string }) => {
+          sdkCalls.push(`environments.get ${environmentId}`);
           const found = environments[environmentId];
           if (found === undefined) {
             throw Object.assign(new Error("Environment not found"), {
@@ -81,21 +83,24 @@ async function setup(options: {
           return found;
         },
       },
-      hosts: { get: async () => makeHostResponse(options.host) },
+      hosts: {
+        get: async () => {
+          sdkCalls.push("hosts.get");
+          return makeHostResponse(options.host);
+        },
+      },
     },
     experimental_callHostRpc:
       options.callHost ??
       ((call) =>
         call.method === "upstream"
           ? { oid: null, branchName: "bb/pr" }
-          : call.method === "upstream"
-            ? { oid: null, branchName: "bb/pr" }
-            : call.method === "view"
-              ? { outcome: "found", pullRequest: view() }
-              : { ok: true }),
+          : call.method === "view"
+            ? { outcome: "found", pullRequest: view() }
+            : { ok: true }),
   });
   await plugin(fake.bb);
-  return fake;
+  return Object.assign(fake, { sdkCalls });
 }
 
 describe("GitHub PR Status server", () => {
@@ -144,7 +149,7 @@ describe("GitHub PR Status server", () => {
     ).resolves.toMatchObject({
       "env-1": {
         outcome: "available",
-        pullRequests: [{ number: 7, title: "Ship it" }],
+        pullRequest: { number: 7, title: "Ship it" },
       },
     });
     expect(
@@ -155,32 +160,21 @@ describe("GitHub PR Status server", () => {
     await next.harness.dispose();
   });
 
-  it("discards unsupported persisted discovery sources and rediscovers", async () => {
+  it("serves cached rows without looking up the environment or machine again", async () => {
     const fake = await setup({});
-    await fake.harness.callRpc("pullRequests", {
-      keys: ["env-1"],
-    });
-    fake.bb.storage
-      .database()
-      .prepare("UPDATE links SET source = ?")
-      .run("future-source");
-
-    const next = await fake.harness.reload(plugin);
-    expect(
-      next.bb.storage.database().prepare("SELECT source FROM links").all(),
-    ).toEqual([]);
-    expect(
-      next.bb.storage.database().prepare("SELECT url FROM snapshots").all(),
-    ).toEqual([]);
+    await fake.harness.callRpc("pullRequests", { keys: ["env-1"] });
+    fake.sdkCalls.length = 0;
     await expect(
-      next.harness.callRpc("pullRequests", { keys: ["env-1"] }),
+      fake.harness.callRpc("pullRequests", { keys: ["env-1"] }),
     ).resolves.toMatchObject({
-      "env-1": { outcome: "available", pullRequests: [{ number: 7 }] },
+      "env-1": { outcome: "available", pullRequest: { number: 7 } },
     });
+    expect(fake.sdkCalls).toEqual([]);
     expect(
-      next.bb.storage.database().prepare("SELECT source FROM links").all(),
-    ).toEqual([{ source: "current-branch" }]);
-    await next.harness.dispose();
+      fake.harness.experimental_hostRpcCalls.filter(
+        (call) => call.method === "view",
+      ),
+    ).toHaveLength(1);
   });
 
   it("reads every requested environment in one call", async () => {
@@ -205,14 +199,11 @@ describe("GitHub PR Status server", () => {
     ).resolves.toEqual({
       "env-1": {
         outcome: "available",
-        currentBranchUrl: "https://github.com/acme/bb/pull/7",
-        pullRequests: [
-          expect.objectContaining({
-            number: 7,
-            state: "open",
-            attention: "none",
-          }),
-        ],
+        pullRequest: expect.objectContaining({
+          number: 7,
+          state: "open",
+          attention: "none",
+        }),
       },
       "env-plain": { outcome: "absent" },
       "env-asleep": { outcome: "unavailable", message: "Host is suspended" },

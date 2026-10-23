@@ -167,7 +167,6 @@ export const pullRequestSchema = z
     url: z.string().url(),
     baseRefName: z.string(),
     headRefName: z.string(),
-    headRefOid: z.string().nullable(),
     updatedAt: z.string().datetime(),
     autoMerge: z.boolean(),
     inMergeQueue: z.boolean().nullable(),
@@ -205,23 +204,6 @@ export function environmentPullRequestTag(environmentId: string): string {
   return `environment:${environmentId}`;
 }
 
-export const environmentPullRequestsSchema = z.discriminatedUnion("outcome", [
-  z
-    .object({
-      outcome: z.literal("available"),
-      pullRequests: z.array(pullRequestSchema).min(1),
-      currentBranchUrl: z.string().url().nullable(),
-    })
-    .strict(),
-  z.object({ outcome: z.literal("absent") }).strict(),
-  z
-    .object({ outcome: z.literal("unavailable"), message: z.string().min(1) })
-    .strict(),
-]);
-export type EnvironmentPullRequests = z.infer<
-  typeof environmentPullRequestsSchema
->;
-
 const environmentActionInputSchema = z
   .object({ environmentId: z.string().min(1) })
   .strict();
@@ -230,13 +212,13 @@ const actionOutputSchema = z.object({ message: z.string() }).strict();
 export const githubPrStatusRpcContract = defineRpcContract({
   pullRequests: {
     experimental_description:
-      "Linked GitHub pull requests for each environment, current branch first, keyed by environment id.",
+      "The GitHub pull request for each environment's current branch, keyed by environment id.",
     input: z
       .object({
         keys: z.array(z.string().min(1)).min(1).max(PULL_REQUESTS_MAX_KEYS),
       })
       .strict(),
-    output: z.record(z.string(), environmentPullRequestsSchema),
+    output: z.record(z.string(), environmentPullRequestSchema),
     keyTags: (key) => [environmentPullRequestTag(key)],
   },
   markReady: {

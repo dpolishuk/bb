@@ -14,7 +14,6 @@ function pullRequest(overrides: Partial<PullRequest> = {}): PullRequest {
     url: "https://github.com/acme/bb/pull/42",
     baseRefName: "main",
     headRefName: "bb/pr-watch",
-    headRefOid: null,
     updatedAt: "2026-06-16T12:30:00Z",
     autoMerge: false,
     inMergeQueue: false,
@@ -75,14 +74,6 @@ function setup(
 function available(pullRequest: PullRequest): EnvironmentPullRequest {
   return { outcome: "available", pullRequest };
 }
-function list(pullRequests: PullRequest[]) {
-  return {
-    outcome: "available",
-    pullRequests,
-    currentBranchUrl: pullRequests[0]?.url ?? null,
-  };
-}
-
 async function flush() {
   await vi.advanceTimersByTimeAsync(0);
 }
@@ -144,7 +135,7 @@ describe("shared pull request refresh", () => {
     );
     restored.store.watch("a", new AbortController().signal);
     await expect(restored.store.read("a", { viewer: true })).resolves.toEqual(
-      list([pending]),
+      available(pending),
     );
     await flush();
     expect(restored.load).toHaveBeenCalledTimes(1);
@@ -157,7 +148,26 @@ describe("shared pull request refresh", () => {
     expect(restored.load).toHaveBeenCalledTimes(2);
   });
 
-  it("retains branch discoveries as ordered links and deletes orphan snapshots with the last environment", async () => {
+  it("makes non-viewer reads after a restart wait for stale data", async () => {
+    vi.useFakeTimers();
+    const first = setup([available(pending)]);
+    await first.store.read("a", { viewer: true });
+    first.store.dispose();
+    const merged = pullRequest({ state: "merged" });
+    const restored = setup([available(merged)], first.owner);
+    await vi.advanceTimersByTimeAsync(60_000);
+    await expect(restored.store.read("a", { viewer: false })).resolves.toEqual(
+      available(merged),
+    );
+    await vi.advanceTimersByTimeAsync(60_000);
+    const renamed = { ...merged, title: "Renamed" };
+    restored.load.mockResolvedValue(available(renamed));
+    await expect(restored.store.read("a", { viewer: false })).resolves.toEqual(
+      available(renamed),
+    );
+  });
+
+  it("replaces an environment's link on a branch change and deletes orphan snapshots", async () => {
     vi.useFakeTimers();
     const next = pullRequest({
       number: 43,
@@ -171,9 +181,14 @@ describe("shared pull request refresh", () => {
     await store.read("a", { viewer: true });
     store.refresh("a", true);
     await expect(store.read("a", { viewer: true })).resolves.toEqual(
-      list([next, pullRequest()]),
+      available(next),
     );
-    expect(persistence.links()).toHaveLength(2);
+    expect(persistence.links()).toMatchObject([
+      { environmentId: "a", url: next.url },
+    ]);
+    expect(
+      persistence.snapshots().map((snapshot) => snapshot.pullRequest.url),
+    ).toEqual([next.url]);
     store.watch("a", new AbortController().signal);
     await flush();
     publish.mockClear();
@@ -193,11 +208,11 @@ describe("shared pull request refresh", () => {
       outcome: "absent",
     });
     expect(persistence.links()).toMatchObject([
-      { environmentId: "a", url: null, current: true },
+      { environmentId: "a", url: null },
     ]);
     store.refresh("a", true);
     await expect(store.read("a", { viewer: true })).resolves.toEqual(
-      list([pullRequest()]),
+      available(pullRequest()),
     );
     expect(persistence.links()).toHaveLength(1);
   });
@@ -237,7 +252,7 @@ describe("shared pull request refresh", () => {
     finish(available(pending));
     await flush();
     await expect(store.read("a", { viewer: true })).resolves.toEqual(
-      list([pullRequest({ state: "merged" })]),
+      available(pullRequest({ state: "merged" })),
     );
     expect(load).toHaveBeenCalledTimes(3);
   });
