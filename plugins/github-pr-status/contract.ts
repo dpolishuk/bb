@@ -314,7 +314,9 @@ export const githubPrStatusHostContract = defineRpcContract({
   },
   upstream: {
     input: z.object({ path: z.string().min(1) }).strict(),
-    output: z.object({ oid: z.string().nullable() }).strict(),
+    output: z
+      .object({ oid: z.string().nullable(), branchName: z.string().nullable() })
+      .strict(),
   },
   act: {
     input: z

@@ -307,6 +307,21 @@ describe("pull request lookup for differently named upstream branches", () => {
 });
 
 describe("workspace state", () => {
+  it("inspects the actual branch and upstream locally without running gh", async () => {
+    const workspacePath = await createManagedBaseTrackedWorkspace();
+    const gh = await installFakeGh({});
+    const oid = (
+      await runGit(["rev-parse", "HEAD"], { cwd: workspacePath })
+    ).stdout.trim();
+    await runGit(["commit", "--allow-empty", "-m", "Local only"], {
+      cwd: workspacePath,
+    });
+    await expect(
+      harness.experimental_call("upstream", { path: workspacePath }),
+    ).resolves.toEqual({ oid, branchName: localBranch });
+    expect(await gh.readCalls()).toEqual([]);
+  });
+
   it("reports a missing workspace path as unavailable", async () => {
     const missing = path.join(await makeTempDir("bb-pr-missing-"), "gone");
     await expect(

@@ -264,6 +264,7 @@ export function createPullRequestStore(options: {
 
   return {
     read,
+    currentUrl,
     hasPullRequest(environmentId: string) {
       return currentUrl(environmentId) !== null;
     },

@@ -142,42 +142,35 @@ export default function githubPrStatusPlugin(bb: BbPluginApi): void {
   );
   const upstreams = new Map<string, string | null>();
 
-  async function checkUpstream(environmentId: string): Promise<void> {
-    if (!store.hasPullRequest(environmentId)) return;
-    try {
-      const environment = await getEnvironment(environmentId);
-      if (environment?.status !== "ready" || environment.path === null) return;
-      const { oid } = await host.call(
-        "upstream",
-        { path: environment.path },
-        { hostId: environment.hostId },
-      );
-      const previous = upstreams.get(environmentId);
-      upstreams.set(environmentId, oid);
-      if (oid !== null && previous !== oid) store.pushed(environmentId);
-    } catch (error) {
-      bb.log.debug(
-        `Failed to inspect upstream for ${environmentId}: ${errorMessage(error)}`,
-      );
-    }
-  }
-
-  async function refreshIfBranchChanged(
+  async function inspectRefs(
     environmentId: string,
     refsChanged: boolean,
   ): Promise<void> {
     if (!lookedUpBranches.has(environmentId)) return;
     try {
       const environment = await getEnvironment(environmentId);
-      if (
-        (environment?.branchName ?? null) !==
-        lookedUpBranches.get(environmentId)
-      ) {
+      if (environment?.status !== "ready" || environment.path === null) return;
+      const refs = await host.call(
+        "upstream",
+        { path: environment.path },
+        { hostId: environment.hostId },
+      );
+      const previousBranch = lookedUpBranches.get(environmentId);
+      const previousOid = upstreams.get(environmentId);
+      lookedUpBranches.set(environmentId, refs.branchName);
+      upstreams.set(environmentId, refs.oid);
+      if (previousBranch !== refs.branchName)
         store.refresh(environmentId, true);
-      } else if (refsChanged) await checkUpstream(environmentId);
+      else if (
+        refsChanged &&
+        store.hasPullRequest(environmentId) &&
+        refs.oid !== null &&
+        previousOid !== refs.oid
+      )
+        store.pushed(environmentId);
     } catch (error) {
       bb.log.debug(
-        `Failed to read environment ${environmentId}: ${errorMessage(error)}`,
+        `Failed to inspect refs for ${environmentId}: ${errorMessage(error)}`,
       );
     }
   }
@@ -193,8 +186,6 @@ export default function githubPrStatusPlugin(bb: BbPluginApi): void {
     } catch (error) {
       return { outcome: "unavailable", message: errorMessage(error) };
     }
-    const branch = environment?.branchName ?? null;
-    lookedUpBranches.set(environmentId, branch);
     if (environment === null || !environment.isGitRepo) {
       return { outcome: "absent" };
     }
@@ -202,14 +193,20 @@ export default function githubPrStatusPlugin(bb: BbPluginApi): void {
       return { outcome: "unavailable", message: "Environment is not ready" };
     }
     try {
-      if (!upstreams.has(environmentId)) {
-        const upstream = await host.call(
-          "upstream",
-          { path: environment.path },
-          { hostId: environment.hostId },
-        );
-        upstreams.set(environmentId, upstream.oid);
-      }
+      const refs = await host.call(
+        "upstream",
+        { path: environment.path },
+        { hostId: environment.hostId },
+      );
+      if (
+        url !== null &&
+        store.currentUrl(environmentId) === url &&
+        lookedUpBranches.has(environmentId) &&
+        lookedUpBranches.get(environmentId) !== refs.branchName
+      )
+        url = null;
+      lookedUpBranches.set(environmentId, refs.branchName);
+      upstreams.set(environmentId, refs.oid);
       const lookup = await host.call(
         "view",
         { path: environment.path, url, refresh },
@@ -283,13 +280,13 @@ export default function githubPrStatusPlugin(bb: BbPluginApi): void {
             store.refresh(environmentId);
             return;
           case "branch":
-            void refreshIfBranchChanged(
+            void inspectRefs(
               environmentId,
               event.changes.includes("git-refs-changed"),
             );
             return;
           case "invalidate":
-            void checkUpstream(environmentId);
+            void inspectRefs(environmentId, true);
             return;
           case null:
             return;
@@ -419,7 +416,7 @@ export default function githubPrStatusPlugin(bb: BbPluginApi): void {
         lookedUpBranches.has(environmentId) &&
         lookedUpBranches.get(environmentId) !== environment.branchName
       )
-        store.refresh(environmentId, true);
+        await inspectRefs(environmentId, false);
       return store.read(environmentId, { viewer });
     } catch (error) {
       return { outcome: "unavailable", message: errorMessage(error) };

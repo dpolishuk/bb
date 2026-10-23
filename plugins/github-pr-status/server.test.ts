@@ -87,9 +87,9 @@ async function setup(options: {
       options.callHost ??
       ((call) =>
         call.method === "upstream"
-          ? { oid: null }
+          ? { oid: null, branchName: "bb/pr" }
           : call.method === "upstream"
-            ? { oid: null }
+            ? { oid: null, branchName: "bb/pr" }
             : call.method === "view"
               ? { outcome: "found", pullRequest: view() }
               : { ok: true }),
@@ -131,7 +131,8 @@ describe("GitHub PR Status server", () => {
       },
       callHost: (call) => {
         if (call.hostId === "host-2") throw new Error("Host is suspended");
-        if (call.method === "upstream") return { oid: null };
+        if (call.method === "upstream")
+          return { oid: null, branchName: "bb/pr" };
         return { outcome: "found", pullRequest: view() };
       },
     });
@@ -230,9 +231,9 @@ describe("GitHub PR Status server", () => {
     const fake = await setup({
       callHost: (call) =>
         call.method === "upstream"
-          ? { oid: null }
+          ? { oid: null, branchName: "bb/pr" }
           : call.method === "upstream"
-            ? { oid: null }
+            ? { oid: null, branchName: "bb/pr" }
             : call.method === "view"
               ? { outcome: "found", pullRequest: view({ isDraft: true }) }
               : { ok: false, message: "gh pr ready failed: HTTP 403" },

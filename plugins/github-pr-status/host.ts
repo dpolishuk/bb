@@ -37,11 +37,17 @@ export default experimental_defineHostEntry({
       });
     },
     async upstream({ path }) {
-      const result = await runGit(["rev-parse", "--verify", "@{u}"], {
-        cwd: path,
-        allowFailure: true,
-      });
-      return { oid: result.exitCode === 0 ? result.stdout.trim() : null };
+      const [result, branchName] = await Promise.all([
+        runGit(["rev-parse", "--verify", "@{u}"], {
+          cwd: path,
+          allowFailure: true,
+        }),
+        getCurrentBranch(path),
+      ]);
+      return {
+        oid: result.exitCode === 0 ? result.stdout.trim() : null,
+        branchName: branchName ?? null,
+      };
     },
     async act({ path, action }) {
       const localBranch = await getCurrentBranch(path);
