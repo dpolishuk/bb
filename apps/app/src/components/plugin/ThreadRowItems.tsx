@@ -9,7 +9,7 @@ import {
   usePluginSlots,
   type PluginThreadRowItemSlot,
 } from "@/lib/plugin-slots";
-import { useThreadRowVisibility } from "@/lib/thread-row-visibility";
+import { useThreadRowLive } from "@/lib/thread-row-visibility";
 
 function sortThreadRowItems(
   slots: readonly PluginThreadRowItemSlot[],
@@ -35,31 +35,28 @@ function MountedThreadRowItems({
   slots: readonly PluginThreadRowItemSlot[];
 }) {
   const anchor = useRef<HTMLSpanElement>(null);
-  const visibility = useThreadRowVisibility(anchor);
-  const isLive = visibility === "live";
+  const isLive = useThreadRowLive(anchor);
   return (
     <span
       ref={anchor}
       data-thread-row-items=""
       className="pointer-events-auto relative z-[31] ml-auto hidden max-w-20 shrink-0 items-center gap-1 overflow-hidden has-[[data-bb-plugin-root]:not(:empty)]:flex"
     >
-      {visibility === "offscreen"
-        ? null
-        : slots.map((slot) => {
-            const Component = slot.component;
-            return (
-              <PluginSlotMount
-                key={`${slot.pluginId}/${slot.id}/${slot.generation}`}
-                pluginId={slot.pluginId}
-                slotKind="threadRowItem"
-                slotId={slot.id}
-                instanceId={thread.id}
-                crashFallback={null}
-              >
-                <Component thread={thread} isLive={isLive} />
-              </PluginSlotMount>
-            );
-          })}
+      {slots.map((slot) => {
+        const Component = slot.component;
+        return (
+          <PluginSlotMount
+            key={`${slot.pluginId}/${slot.id}/${slot.generation}`}
+            pluginId={slot.pluginId}
+            slotKind="threadRowItem"
+            slotId={slot.id}
+            instanceId={thread.id}
+            crashFallback={null}
+          >
+            <Component thread={thread} isLive={isLive} />
+          </PluginSlotMount>
+        );
+      })}
     </span>
   );
 }

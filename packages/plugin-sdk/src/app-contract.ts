@@ -1769,9 +1769,10 @@ export interface ExperimentalThreadRowItemProps {
   /** The row's thread, the same value the list renders. */
   thread: PluginSidebarThread;
   /**
-   * True once the row has stayed on screen through a short scroll pause
-   * (about 200 ms) while the page is visible. Gate network reads, watches and
-   * polling on it (for example `enabled: isLive` on
+   * True while the row is on screen and the page is visible. It changes only
+   * at a scroll pause (about 200 ms after scrolling stops), for every row at
+   * once, and turns off immediately when the page hides. Gate network reads,
+   * watches and polling on it (for example `enabled: isLive` on
    * `experimental_useRpcKeyedQuery`) and render cached data either way, so
    * scrolling past rows reads nothing and rows on screen read together.
    */
@@ -1780,8 +1781,8 @@ export interface ExperimentalThreadRowItemProps {
 
 /**
  * A small item on each thread row, beside the title and before the row's
- * status glyph: a badge, not a control. The host mounts the component only
- * while its row is on screen, caps the row's items at 80 px together, hides
+ * status glyph: a badge, not a control. The host mounts the component with
+ * its row, caps the row's items at 80 px together, hides
  * them while the row is renamed or customized, and keeps them visible on
  * hover. Render null to show nothing for a thread. Keep it to an icon-sized
  * glyph with a tooltip; clicks on it open the thread like the rest of the
@@ -5305,7 +5306,8 @@ export interface PluginSdkApp {
    * Every `experimental_threadRowItem` contribution for one thread row (see
    * {@link ExperimentalThreadRowItemRegistration}), the items bb's sidebar
    * draws on its rows. Render it inside your row's title area, after the
-   * title, so badges such as a pull request's status appear on your rows as
+   * title; its parent element is what bb watches for visibility, so give it
+   * a box (not `display: contents`), so badges such as a pull request's status appear on your rows as
    * they do on bb's. It renders nothing when no plugin contributes an item.
    * Experimental: see docs/api_to_audit.md.
    */

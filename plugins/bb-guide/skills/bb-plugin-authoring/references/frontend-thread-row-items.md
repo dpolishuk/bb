@@ -17,6 +17,7 @@ function DeployBadge({ thread, isLive }: ExperimentalThreadRowItemProps) {
     contract,
     method: "deploys",
     keys: key ? [key] : [],
+    input: { maxAgeMs: 60_000 },
     enabled: isLive && key !== undefined,
   });
   const deploy = key ? data?.[key] : undefined;
@@ -24,10 +25,10 @@ function DeployBadge({ thread, isLive }: ExperimentalThreadRowItemProps) {
 }
 ```
 
-Components receive `{ thread, isLive }` and mount only while their row is near
-the screen; return null to show nothing. `isLive` turns true once the row has
-stayed on screen through a short scroll pause with the page visible, and false
-again when it leaves or the page hides. Gate reads, watches and polling on it
+Components receive `{ thread, isLive }` and mount with their row; return null
+to show nothing. `isLive` changes only at a scroll pause: on-screen rows turn
+live and rows that left stop, together, about 200 ms after scrolling stops,
+while the page is visible. Hiding the page turns every row off at once. Gate reads, watches and polling on it
 and render cached data either way: rows that appear together read together in
 one keyed request, rows scrolled past read nothing, and cached items draw in
 the row's first frame. Keep the item icon-sized with a tooltip; the row's items
@@ -39,7 +40,13 @@ registration order. A crash removes only that item on that row.
 
 A plugin-built thread list renders every plugin's `experimental_threadRowItem`
 (bb's pull request badge among them) by placing `experimental_ThreadRowItems`
-with the row's `thread` inside the row's title area, after the title. It
-renders nothing when no plugin contributes an item. Clicks on an item reach
+with the row's `thread` inside the row's title area, after the title. Its
+parent element is what bb watches for visibility, so give it a box (not
+`display: contents`). It renders nothing when no plugin contributes an item. Clicks on an item reach
 your row's own handlers; forward them to your row link if the row is not
 itself the link. frontend-pull-requests.md shows a full row.
+
+`input` sends the method's other fields with every batched read of the hook's
+keys; hooks with different `input` keep separate caches. A row read that
+accepts saved data (as the GitHub PR Status read's `maxAgeMs` does) draws
+without waiting and refreshes in the background.

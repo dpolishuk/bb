@@ -2586,14 +2586,17 @@ one row, sorted by `order` (unset last) then registration order, each in its
 own crash boundary keyed by thread, inside one container capped at 80 px that
 is hidden while empty. It renders nothing when no plugin registers an item.
 
-Visibility is the host's (`apps/app/src/lib/thread-row-visibility.ts`): one
-IntersectionObserver per scroll container with a 240 px margin mounts a row's
-items while it is near the screen, so cached data draws in the row's first
-frame and items unmount for far rows; a second, viewport observer marks rows on
-screen, and `isLive` turns true for every on-screen row together 200 ms after
-the last row entered, while the page is visible. Leaving the screen or hiding
-the page clears it. Items gate network reads on `isLive`, so a scroll pause
-costs one keyed request and rows scrolled past read nothing.
+Visibility is the host's (`apps/app/src/lib/thread-row-visibility.ts`). Items
+mount with their row, so cached data draws in the row's first frame; the list's
+own windowing decides which rows exist. One viewport IntersectionObserver
+watches each row (the items container's parent element), and `isLive` changes
+only at a scroll pause: 200 ms after the last row entered or left the screen,
+every on-screen row turns live and every off-screen row stops, in one batch, so
+continuous scrolling re-renders no items. Hiding the page clears it at once.
+Items gate network reads on `isLive`, so a scroll pause costs one keyed request
+and rows scrolled past read nothing. The GitHub PR Status badge reads with
+`input: { maxAgeMs }`, so saved rows answer at once and refresh in the
+background.
 
 **Core callers.** bb's sidebar (`plugins/thread-list`, `ThreadRow.tsx`) renders
 `experimental_ThreadRowItems` in each row's title area, the same call a
@@ -2616,9 +2619,9 @@ Docs: `frontend-registration.md`, `frontend-pull-requests.md`.
    core's own indicators that depend on it stayed out of the slot.
 2. **Width.** All items share 80 px and titles truncate first. Confirm the cap
    holds once several plugins contribute, or whether items need a priority.
-3. **Visibility contract.** `isLive` is advisory: an item that reads while not
-   live still mounts only near the screen, but the host does not block the
-   read. Decide whether the SDK should enforce it.
+3. **Visibility contract.** `isLive` is advisory: the host does not block a
+   read from an item that is not live, and a row that leaves the screen stays
+   live until the next scroll pause. Decide whether the SDK should enforce it.
 4. **Settle delay.** Uncached rows wait 200 ms after scrolling stops. Confirm
    the delay with users on slow and fast scrollers.
 
@@ -3533,7 +3536,7 @@ field introduces no separate backend or headless side effect.
 
 ## Plugin contract live reads and writes
 
-- `experimental_useRpcQuery`, `experimental_useRpcKeyedQuery`, `experimental_useRpcMutation`, and `experimental_useRpcRefresh` use the core `@bb/query-tags` cache mechanism per client. Query state keeps previous data during refresh errors; consumers show an inline Retry using `refetch`. Successful reads clear the error. Keyed calls accept `{ keys }` and return a record containing every requested key; consumers share one observer per plugin/method and requests batch up to 200 keys. Each hook watches a key once while it holds it, so a changing key list subscribes only added keys and releases only removed ones (main re-subscribed every key on each change: 3,100 subscribe and 3,100 unsubscribe frames while scrolling a 70-thread sidebar). A keyed `refetch` refreshes only the calling hook's keys, batched with other hooks refreshing in the same tick. A pure `select` projection retains unchanged JSON subobjects across key and fetch-state changes, so default rows do not republish unchanged notification levels.
+- `experimental_useRpcQuery`, `experimental_useRpcKeyedQuery`, `experimental_useRpcMutation`, and `experimental_useRpcRefresh` use the core `@bb/query-tags` cache mechanism per client. Query state keeps previous data during refresh errors; consumers show an inline Retry using `refetch`. Successful reads clear the error. Keyed calls accept `{ keys }` and return a record containing every requested key; consumers share one observer per plugin/method (and per `input`, the method's other fields, which every batched read of that hook's keys sends) and requests batch up to 200 keys. Each hook watches a key once while it holds it, so a changing key list subscribes only added keys and releases only removed ones (main re-subscribed every key on each change: 3,100 subscribe and 3,100 unsubscribe frames while scrolling a 70-thread sidebar). A keyed `refetch` refreshes only the calling hook's keys, batched with other hooks refreshing in the same tick. A pure `select` projection retains unchanged JSON subobjects across key and fetch-state changes, so default rows do not republish unchanged notification levels.
 - `ExperimentalRpcMutationState.pendingInputs` contains every in-flight input for that hook instance until the server acknowledges its write. Background rereads are excluded. `isPending` remains true while any input is pending. Core `useTaggedMutation` exposes the same state from TanStack's mutation cache. Stabilization requires hook-instance isolation, concurrent targets, failure cleanup, and pending feedback surviving row moves between groups.
 - `ExperimentalRpcMutationOptions.optimistic(input, cache)` predicts loaded cached values before the write. `cache.update(method, input, updater)` targets a plain read, and `cache.updateKey(method, key, updater)` targets one keyed row. `cache` is an `ExperimentalRpcOptimisticCache`. Pure updaters receive the currently visible value and return its prediction. An absent plain read is skipped; a keyed row that loads while the write is pending shows the prediction. Predictions are shared by every reader on that client. The core route mutation accepts the same core optimistic descriptors and uses the same `@bb/query-tags` implementation. Ui-preferences already updates its shared Jotai atoms optimistically, which remains unchanged.
 - Predictions remain over incoming reads until confirmed matched reads arrive, independently of mutation pending state. A rejected write rolls back its layer and surfaces the mutation error. An accepted write whose refresh fails keeps its prediction with the read error and Retry; a successful refresh replaces it. Later predictions and confirmed values are protected from older mutation settles and rollbacks. Inverted completion retains the later confirmed value until a subsequent fresh read can replace it. Keyed rows live in the `@bb/query-tags` keyed store: an accepted row prediction becomes the row's value, and only a read of that row that started after acceptance replaces it. Stabilization includes overlapping writes, external invalidation, refresh failures, plain/keyed targets and completion without stale flicker.

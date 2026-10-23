@@ -43,15 +43,10 @@ class FakeIntersectionObserver {
   }
 }
 
-function intersect(
-  kind: "near" | "screen",
-  target: Element,
-  isIntersecting: boolean,
-) {
+function intersect(target: Element, isIntersecting: boolean) {
   act(() => {
     for (const observer of FakeIntersectionObserver.instances)
-      if ((observer.options.rootMargin !== undefined) === (kind === "near"))
-        observer.fire(target, isIntersecting);
+      observer.fire(target, isIntersecting);
   });
 }
 
@@ -99,7 +94,7 @@ afterEach(() => {
 });
 
 describe("thread row items", () => {
-  it("draws cached items in the row's first frame, reads only after a scroll pause on screen, and unmounts far rows", () => {
+  it("draws items in the row's first frame and turns them live only after a scroll pause on screen", () => {
     setPluginSlotRegistrations(
       "demo",
       makePluginRegistrationSet({
@@ -109,7 +104,7 @@ describe("thread row items", () => {
     const { row } = renderRow();
     expect(screen.getByTestId("badge").dataset.live).toBeUndefined();
 
-    intersect("screen", row, true);
+    intersect(row, true);
     act(() => vi.advanceTimersByTime(THREAD_ROW_SETTLE_MS - 1));
     expect(screen.getByTestId("badge").dataset.live).toBeUndefined();
     act(() => vi.advanceTimersByTime(1));
@@ -133,13 +128,13 @@ describe("thread row items", () => {
     });
     expect(screen.getByTestId("badge").dataset.live).toBe("");
 
-    intersect("screen", row, false);
+    intersect(row, false);
+    expect(screen.getByTestId("badge").dataset.live).toBe("");
+    act(() => vi.advanceTimersByTime(THREAD_ROW_SETTLE_MS));
     expect(screen.getByTestId("badge").dataset.live).toBeUndefined();
-    intersect("near", row, false);
-    expect(screen.queryByTestId("badge")).toBeNull();
   });
 
-  it("keeps rows that scroll past from going live", () => {
+  it("keeps rows that scroll past from going live and re-renders nothing while scrolling", () => {
     setPluginSlotRegistrations(
       "demo",
       makePluginRegistrationSet({
@@ -147,11 +142,13 @@ describe("thread row items", () => {
       }),
     );
     const { row } = renderRow();
-    intersect("screen", row, true);
+    const rendersAtMount = seen.length;
+    intersect(row, true);
     act(() => vi.advanceTimersByTime(THREAD_ROW_SETTLE_MS / 2));
-    intersect("screen", row, false);
+    intersect(row, false);
     act(() => vi.advanceTimersByTime(THREAD_ROW_SETTLE_MS * 5));
     expect(seen.some((render) => render.isLive)).toBe(false);
+    expect(seen).toHaveLength(rendersAtMount);
   });
 
   it("orders items, renders nothing without contributions, and drops only a crashing item", () => {

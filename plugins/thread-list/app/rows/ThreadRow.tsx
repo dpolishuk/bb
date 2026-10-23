@@ -586,7 +586,11 @@ function ThreadRowComponent({
   );
   const handleRowItemClick = useCallback<MouseEventHandler<HTMLSpanElement>>(
     (event) => {
-      if (event.target instanceof Element && event.target.closest("a, button"))
+      if (
+        !(event.target instanceof Element) ||
+        event.target.closest("[data-thread-row-items]") === null ||
+        event.target.closest("a, button")
+      )
         return;
       event.preventDefault();
       event.stopPropagation();
@@ -627,6 +631,7 @@ function ThreadRowComponent({
               : SIDEBAR_HOVER_ACTIONS_INSET_CLASS),
         )}
         style={getHoverActionsInsetStyle(quickActions.length)}
+        onClick={handleRowItemClick}
       >
         <a
           ref={rowLinkRef}
@@ -742,9 +747,7 @@ function ThreadRowComponent({
           />
         ) : null}
         {isEditing || isCustomizingActions ? null : (
-          <span className="contents" onClick={handleRowItemClick}>
-            <ThreadRowItems thread={thread} />
-          </span>
+          <ThreadRowItems thread={thread} />
         )}
       </span>
       {rowDragBindings && !rowDragBindings.disabled && !isActionsOpen ? (

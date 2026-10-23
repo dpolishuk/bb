@@ -72,6 +72,8 @@ const keyedQueryKey = (
     method,
     input === null ? { keyed: true } : { keyed: true, input },
   );
+const keyListSchema = z.array(z.string());
+const jsonRecordSchema = z.record(z.string(), jsonValueSchema);
 const keyedCollections = new Map<string, KeyedCollection<unknown>>();
 const keyedCollectionsByMethod = new Map<
   string,
@@ -269,7 +271,7 @@ export function createRpcQueryHooks(useHost: () => RpcQueryHost) {
     const enabled = options.enabled ?? true;
     const identity = JSON.stringify([...new Set(options.keys)].sort());
     const keys = useMemo(
-      () => z.array(z.string()).parse(JSON.parse(identity)),
+      () => keyListSchema.parse(JSON.parse(identity)),
       [identity],
     );
     let cache = owners.get(host.queryClient);
@@ -277,14 +279,18 @@ export function createRpcQueryHooks(useHost: () => RpcQueryHost) {
       cache = new Map();
       owners.set(host.queryClient, cache);
     }
-    const extra =
-      options.input === undefined
-        ? null
-        : z.record(z.string(), jsonValueSchema).parse(options.input);
-    const inputIdentity =
-      extra === null || Object.keys(extra).length === 0
-        ? null
-        : canonicalPluginReadInput(extra);
+    const { input: rawInput } = options;
+    const { extra, inputIdentity } = useMemo(() => {
+      const parsed =
+        rawInput === undefined ? null : jsonRecordSchema.parse(rawInput);
+      return {
+        extra: parsed,
+        inputIdentity:
+          parsed === null || Object.keys(parsed).length === 0
+            ? null
+            : canonicalPluginReadInput(parsed),
+      };
+    }, [rawInput]);
     const id = JSON.stringify([pluginId, options.method, inputIdentity]);
     let owner = cache.get(id);
     if (!owner) {
@@ -309,9 +315,7 @@ export function createRpcQueryHooks(useHost: () => RpcQueryHost) {
           );
           return {
             ...response,
-            result: z
-              .record(z.string(), jsonValueSchema)
-              .parse(response.result),
+            result: jsonRecordSchema.parse(response.result),
           };
         },
       });

@@ -5,48 +5,38 @@ import {
   type RefObject,
 } from "react";
 
-export type ThreadRowVisibility = "offscreen" | "near" | "live";
-
 export const THREAD_ROW_SETTLE_MS = 200;
-const NEAR_MARGIN = "240px 0px";
 
 interface RowState {
-  near: boolean;
   onScreen: boolean;
   live: boolean;
-  nearObserver: IntersectionObserver;
   listeners: Set<() => void>;
 }
 
 const rows = new Map<Element, RowState>();
-const nearObservers = new Map<Element | null, IntersectionObserver>();
-let screenObserver: IntersectionObserver | null = null;
+let observer: IntersectionObserver | null = null;
 let settleTimer: ReturnType<typeof setTimeout> | undefined;
-
-function visibilityOf(state: RowState): ThreadRowVisibility {
-  if (!state.near && !state.onScreen) return "offscreen";
-  return state.live ? "live" : "near";
-}
-
-function update(state: RowState, change: () => void): void {
-  const before = visibilityOf(state);
-  change();
-  if (visibilityOf(state) === before) return;
-  for (const listener of state.listeners) listener();
-}
 
 function pageHidden(): boolean {
   return document.visibilityState === "hidden";
 }
 
+function applyLive(nextLive: (state: RowState) => boolean): void {
+  const changed: RowState[] = [];
+  for (const state of rows.values()) {
+    const live = nextLive(state);
+    if (live === state.live) continue;
+    state.live = live;
+    changed.push(state);
+  }
+  for (const state of changed)
+    for (const listener of state.listeners) listener();
+}
+
 function settle(): void {
   settleTimer = undefined;
   if (pageHidden()) return;
-  for (const state of rows.values())
-    if (state.onScreen && !state.live)
-      update(state, () => {
-        state.live = true;
-      });
+  applyLive((state) => state.onScreen);
 }
 
 function scheduleSettle(): void {
@@ -61,79 +51,31 @@ function onVisibilityChange(): void {
   }
   clearTimeout(settleTimer);
   settleTimer = undefined;
-  for (const state of rows.values())
-    update(state, () => {
-      state.live = false;
-    });
+  applyLive(() => false);
 }
 
-function onScreenEntries(entries: readonly IntersectionObserverEntry[]) {
-  let entered = false;
+function onIntersections(entries: readonly IntersectionObserverEntry[]) {
+  let changed = false;
   for (const entry of entries) {
     const state = rows.get(entry.target);
     if (state === undefined || state.onScreen === entry.isIntersecting)
       continue;
-    entered ||= entry.isIntersecting;
-    update(state, () => {
-      state.onScreen = entry.isIntersecting;
-      if (!entry.isIntersecting) state.live = false;
-    });
+    state.onScreen = entry.isIntersecting;
+    changed = true;
   }
-  if (entered) scheduleSettle();
-}
-
-function onNearEntries(entries: readonly IntersectionObserverEntry[]) {
-  for (const entry of entries) {
-    const state = rows.get(entry.target);
-    if (state === undefined || state.near === entry.isIntersecting) continue;
-    update(state, () => {
-      state.near = entry.isIntersecting;
-    });
-  }
-}
-
-function scrollRoot(element: Element): Element | null {
-  for (
-    let candidate = element.parentElement;
-    candidate !== null;
-    candidate = candidate.parentElement
-  ) {
-    const { overflowY } = getComputedStyle(candidate);
-    if (overflowY === "auto" || overflowY === "scroll") return candidate;
-  }
-  return null;
-}
-
-function nearObserverFor(root: Element | null): IntersectionObserver {
-  let observer = nearObservers.get(root);
-  if (observer === undefined) {
-    observer = new IntersectionObserver(onNearEntries, {
-      root,
-      rootMargin: NEAR_MARGIN,
-    });
-    nearObservers.set(root, observer);
-  }
-  return observer;
+  if (changed) scheduleSettle();
 }
 
 function observeRow(element: Element, listener: () => void): () => void {
   let state = rows.get(element);
   if (state === undefined) {
-    if (screenObserver === null) {
-      screenObserver = new IntersectionObserver(onScreenEntries);
+    if (observer === null) {
+      observer = new IntersectionObserver(onIntersections);
       document.addEventListener("visibilitychange", onVisibilityChange);
     }
-    const nearObserver = nearObserverFor(scrollRoot(element));
-    state = {
-      near: true,
-      onScreen: false,
-      live: false,
-      nearObserver,
-      listeners: new Set(),
-    };
+    state = { onScreen: false, live: false, listeners: new Set() };
     rows.set(element, state);
-    nearObserver.observe(element);
-    screenObserver.observe(element);
+    observer.observe(element);
   }
   state.listeners.add(listener);
   const current = state;
@@ -141,39 +83,24 @@ function observeRow(element: Element, listener: () => void): () => void {
     current.listeners.delete(listener);
     if (current.listeners.size > 0) return;
     rows.delete(element);
-    current.nearObserver.unobserve(element);
-    screenObserver?.unobserve(element);
+    observer?.unobserve(element);
     if (rows.size > 0) return;
-    for (const observer of nearObservers.values()) observer.disconnect();
-    nearObservers.clear();
-    screenObserver?.disconnect();
-    screenObserver = null;
+    observer?.disconnect();
+    observer = null;
     document.removeEventListener("visibilitychange", onVisibilityChange);
     clearTimeout(settleTimer);
     settleTimer = undefined;
   };
 }
 
-function boxedAncestor(element: Element): Element | null {
-  let candidate = element.parentElement;
-  while (
-    candidate !== null &&
-    getComputedStyle(candidate).display === "contents"
-  )
-    candidate = candidate.parentElement;
-  return candidate;
-}
-
-export function useThreadRowVisibility(
-  anchor: RefObject<Element | null>,
-): ThreadRowVisibility {
+export function useThreadRowLive(anchor: RefObject<Element | null>): boolean {
   const target = useRef<Element | null>(null);
   const subscribe = useCallback(
     (listener: () => void) => {
       if (typeof IntersectionObserver === "undefined") return () => {};
-      const element = anchor.current && boxedAncestor(anchor.current);
+      const element = anchor.current?.parentElement ?? null;
       target.current = element;
-      if (!element) return () => {};
+      if (element === null) return () => {};
       const stop = observeRow(element, listener);
       return () => {
         stop();
@@ -182,10 +109,10 @@ export function useThreadRowVisibility(
     },
     [anchor],
   );
-  const getSnapshot = useCallback((): ThreadRowVisibility => {
-    if (typeof IntersectionObserver === "undefined") return "live";
+  const getSnapshot = useCallback((): boolean => {
+    if (typeof IntersectionObserver === "undefined") return true;
     const state = target.current && rows.get(target.current);
-    return state ? visibilityOf(state) : "near";
+    return state ? state.live : false;
   }, []);
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 }

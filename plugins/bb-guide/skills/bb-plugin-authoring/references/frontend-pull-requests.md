@@ -31,10 +31,11 @@ function Row({ thread }: { thread: PluginSidebarThread }) {
 }
 ```
 
-The items mount only while the row is near the screen, draw cached data at
-once, and read only after the row has stayed on screen through a short scroll
-pause, so every row on screen shares one batched request and rows scrolled
-past read nothing. Clicks on an item reach your row's own handlers; forward
+The items mount with the row and draw cached data at once. They read only once
+the row is on screen at a scroll pause, so every row on screen shares one
+batched request and rows scrolled past read nothing. The badge asks for saved
+rows of any age (`maxAgeMs`), so it never waits on GitHub; saved rows refresh
+in the background. Clicks on an item reach your row's own handlers; forward
 them to your row link if the row is not itself the link.
 
 ## Read the data yourself

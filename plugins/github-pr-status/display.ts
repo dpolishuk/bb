@@ -1,9 +1,19 @@
 import type { PullRequest, PullRequestState } from "./contract.js";
-import type { IconName } from "@bb/shared-ui/icon";
+
+export type PullRequestIconName =
+  | "GitPullRequestArrow"
+  | "GitPullRequestDraft"
+  | "GitMerge"
+  | "GitPullRequestClosed"
+  | "CircleX"
+  | "Clock"
+  | "CircleCheck"
+  | "Circle"
+  | "CircleQuestion";
 
 interface PullRequestDisplay {
   label: string;
-  icon: IconName;
+  icon: PullRequestIconName;
   className: string;
 }
 
@@ -48,7 +58,7 @@ export type PullRequestNextStepTone = "action" | "ready" | "waiting";
 export interface PullRequestNextStep {
   label: string;
   tone: PullRequestNextStepTone;
-  icon: IconName | null;
+  icon: PullRequestIconName | null;
   running: boolean;
 }
 
@@ -83,7 +93,10 @@ const CHECKS_RUNNING_STEP: PullRequestNextStep = {
   running: true,
 };
 
-function checksResult(label: string, icon: IconName): PullRequestNextStep {
+function checksResult(
+  label: string,
+  icon: PullRequestIconName,
+): PullRequestNextStep {
   return { label, tone: "waiting", icon, running: false };
 }
 
