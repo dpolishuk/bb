@@ -5,7 +5,7 @@ import { useEffect, useRef } from "react";
 import {
   GITHUB_PR_STATUS_PLUGIN_ID,
   githubPrStatusRpcContract,
-  type EnvironmentPullRequest,
+  isEnvironmentPullRequestStale,
   type PullRequest,
 } from "bb-plugin-bb--github-pr-status/contract";
 import {
@@ -13,38 +13,14 @@ import {
   experimental_useRpcMutation as useRpcMutation,
 } from "@/lib/plugin-sdk-hooks";
 
-const OPEN_PULL_REQUEST_STALE_MS = 30_000;
-const SETTLED_PULL_REQUEST_STALE_MS = 60 * 60_000;
-
-export function isEnvironmentPullRequestStale(
-  row: EnvironmentPullRequest,
-  loadedAt: number,
-  now: number,
-): boolean {
-  const settled =
-    row.outcome === "available" &&
-    (row.pullRequest.state === "merged" || row.pullRequest.state === "closed");
-  return (
-    now - loadedAt >
-    (settled ? SETTLED_PULL_REQUEST_STALE_MS : OPEN_PULL_REQUEST_STALE_MS)
-  );
-}
-
 const loadedAtByEnvironment = new Map<string, number>();
-const shownEnvironments = new Map<string, number>();
-let refetchQueued = false;
 
-function queueRefetch(refetch: () => Promise<void>): void {
-  if (refetchQueued) return;
-  refetchQueued = true;
-  queueMicrotask(() => {
-    refetchQueued = false;
-    const refreshed = [...shownEnvironments.keys()];
-    void refetch().then(() => {
-      const loadedAt = Date.now();
-      for (const environmentId of refreshed)
-        loadedAtByEnvironment.set(environmentId, loadedAt);
-    });
+function refetchEnvironment(
+  environmentId: string,
+  refetch: () => Promise<void>,
+): void {
+  void refetch().then(() => {
+    loadedAtByEnvironment.set(environmentId, Date.now());
   });
 }
 
@@ -90,11 +66,8 @@ export function useEnvironmentPullRequest(
 
   useEffect(() => {
     if (!enabled || !environmentId) return;
-    shownEnvironments.set(
-      environmentId,
-      (shownEnvironments.get(environmentId) ?? 0) + 1,
-    );
-    if (latest.current.row !== undefined) queueRefetch(latest.current.refetch);
+    if (latest.current.row !== undefined)
+      refetchEnvironment(environmentId, latest.current.refetch);
     const refetchIfStale = () => {
       if (document.visibilityState === "hidden") return;
       const current = latest.current.row;
@@ -106,7 +79,7 @@ export function useEnvironmentPullRequest(
           Date.now(),
         )
       ) {
-        queueRefetch(latest.current.refetch);
+        refetchEnvironment(environmentId, latest.current.refetch);
       }
     };
     document.addEventListener("visibilitychange", refetchIfStale);
@@ -114,9 +87,6 @@ export function useEnvironmentPullRequest(
     return () => {
       document.removeEventListener("visibilitychange", refetchIfStale);
       window.removeEventListener("pageshow", refetchIfStale);
-      const count = (shownEnvironments.get(environmentId) ?? 1) - 1;
-      if (count > 0) shownEnvironments.set(environmentId, count);
-      else shownEnvironments.delete(environmentId);
     };
   }, [enabled, environmentId]);
 

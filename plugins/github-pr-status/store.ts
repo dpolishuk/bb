@@ -1,8 +1,13 @@
-import type { EnvironmentPullRequest, PullRequest } from "./contract.js";
+import {
+  pullRequestStaleAfterMs,
+  type EnvironmentPullRequest,
+  type PullRequest,
+} from "./contract.js";
 import type { PullRequestPersistence } from "./persistence.js";
 
 const CACHE_TTL_MS = 10_000;
 const ACTIVE_CHECK_MS = 30_000;
+const WATCH_READ_WINDOW_MS = 10;
 
 type Snapshot = { pullRequest: PullRequest; fetchedAt: number };
 type Lookup =
@@ -39,7 +44,10 @@ export function createPullRequestStore(options: {
   const inflight = new Map<string, Promise<void>>();
   const loadingReaders = new Map<string, Set<string>>();
   const settling = new Map<string, number>();
-  const timers = new Map<string, ReturnType<typeof setTimeout>>();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let watchReadTimer: ReturnType<typeof setTimeout> | undefined;
+  const watchReads = new Set<string>();
+  const unpublished = new Set<string>();
   const generations = new Map<string, number>();
   const restored = new Set<string>();
   let disposed = false;
@@ -100,18 +108,24 @@ export function createPullRequestStore(options: {
         changed.push(environmentId);
       served.set(environmentId, content);
     }
-    if (changed.length > 0) options.publish(changed);
+    if (changed.length === 0) return;
+    if (unpublished.size === 0)
+      queueMicrotask(() => {
+        const environmentIds = [...unpublished];
+        unpublished.clear();
+        if (!disposed && environmentIds.length > 0)
+          options.publish(environmentIds);
+      });
+    for (const environmentId of changed) unpublished.add(environmentId);
   }
 
-  function schedule() {
-    for (const timer of timers.values()) clearTimeout(timer);
-    timers.clear();
-    if (disposed) return;
+  function dueChecks(): { url: string; environmentId: string; due: number }[] {
     const watched = new Map<string, string>();
     for (const environmentId of watches.keys()) {
       const url = currentUrl(environmentId);
       if (url !== null && !watched.has(url)) watched.set(url, environmentId);
     }
+    const due: { url: string; environmentId: string; due: number }[] = [];
     for (const [url, environmentId] of watched) {
       const snapshot = snapshots.get(url);
       if (
@@ -121,18 +135,33 @@ export function createPullRequestStore(options: {
           (settling.get(url) ?? 0) <= snapshot.fetchedAt)
       )
         continue;
-      const delay = Math.max(
-        0,
-        snapshot.fetchedAt + ACTIVE_CHECK_MS - Date.now(),
-      );
-      timers.set(
+      due.push({
         url,
-        setTimeout(() => {
-          timers.delete(url);
-          void load(environmentId, url, new Set());
-        }, delay),
-      );
+        environmentId,
+        due: snapshot.fetchedAt + ACTIVE_CHECK_MS,
+      });
     }
+    return due;
+  }
+
+  function schedule() {
+    clearTimeout(timer);
+    timer = undefined;
+    if (disposed) return;
+    const checks = dueChecks();
+    if (checks.length === 0) return;
+    const next = Math.min(...checks.map((check) => check.due));
+    timer = setTimeout(
+      () => {
+        timer = undefined;
+        const horizon = Date.now() + ACTIVE_CHECK_MS / 2;
+        for (const check of dueChecks())
+          if (check.due <= horizon)
+            void load(check.environmentId, check.url, new Set());
+        schedule();
+      },
+      Math.max(0, next - Date.now()),
+    );
   }
 
   async function load(
@@ -219,15 +248,32 @@ export function createPullRequestStore(options: {
     return task;
   }
 
+  function isStale(
+    environmentId: string,
+    fetchedAt: number,
+    rule: "ttl" | "watch",
+  ): boolean {
+    if (rule === "ttl") return Date.now() - fetchedAt >= CACHE_TTL_MS;
+    const url = currentUrl(environmentId);
+    const snapshot = url === null ? undefined : snapshots.get(url);
+    return (
+      Date.now() - fetchedAt >=
+      pullRequestStaleAfterMs(snapshot?.pullRequest ?? null)
+    );
+  }
+
   async function read(
     environmentId: string,
-    { viewer }: { viewer: boolean },
+    { viewer, rule = "ttl" }: { viewer: boolean; rule?: "ttl" | "watch" },
   ): Promise<EnvironmentPullRequest> {
     const cached = lookups.get(environmentId);
     const immediate =
       viewer && restored.has(environmentId) && cached !== undefined;
     if (viewer) restored.delete(environmentId);
-    if (cached === undefined || Date.now() - cached.fetchedAt >= CACHE_TTL_MS) {
+    if (
+      cached === undefined ||
+      isStale(environmentId, cached.fetchedAt, rule)
+    ) {
       const loading = load(
         environmentId,
         currentUrl(environmentId),
@@ -313,12 +359,19 @@ export function createPullRequestStore(options: {
         },
         { once: true },
       );
-      void read(environmentId, { viewer: false });
+      watchReads.add(environmentId);
+      watchReadTimer ??= setTimeout(() => {
+        watchReadTimer = undefined;
+        const environmentIds = [...watchReads];
+        watchReads.clear();
+        for (const id of environmentIds)
+          if (watches.has(id)) void read(id, { viewer: false, rule: "watch" });
+      }, WATCH_READ_WINDOW_MS);
     },
     dispose() {
       disposed = true;
-      for (const timer of timers.values()) clearTimeout(timer);
-      timers.clear();
+      clearTimeout(timer);
+      clearTimeout(watchReadTimer);
     },
   };
 }

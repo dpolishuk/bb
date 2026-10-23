@@ -3,6 +3,7 @@ import { z } from "zod";
 
 export const GITHUB_PR_STATUS_PLUGIN_ID = "bb--github-pr-status";
 export const PULL_REQUESTS_MAX_KEYS = 200;
+export const HOST_VIEWS_MAX_READS = 200;
 
 const checkStatusSchema = z.enum([
   "queued",
@@ -204,6 +205,28 @@ export function environmentPullRequestTag(environmentId: string): string {
   return `environment:${environmentId}`;
 }
 
+const OPEN_PULL_REQUEST_STALE_MS = 30_000;
+const SETTLED_PULL_REQUEST_STALE_MS = 60 * 60_000;
+
+export function pullRequestStaleAfterMs(
+  pullRequest: Pick<PullRequest, "state"> | null,
+): number {
+  return pullRequest?.state === "merged" || pullRequest?.state === "closed"
+    ? SETTLED_PULL_REQUEST_STALE_MS
+    : OPEN_PULL_REQUEST_STALE_MS;
+}
+
+export function isEnvironmentPullRequestStale(
+  row: EnvironmentPullRequest,
+  loadedAt: number,
+  now: number,
+): boolean {
+  return (
+    now - loadedAt >
+    pullRequestStaleAfterMs(row.outcome === "available" ? row.pullRequest : null)
+  );
+}
+
 const environmentActionInputSchema = z
   .object({ environmentId: z.string().min(1) })
   .strict();
@@ -284,15 +307,24 @@ const hostPullRequestActionResultSchema = z.discriminatedUnion("ok", [
 ]);
 
 export const githubPrStatusHostContract = defineRpcContract({
-  view: {
+  views: {
     input: z
       .object({
-        path: z.string().min(1),
-        url: z.string().url().nullable(),
-        refresh: z.boolean(),
+        reads: z
+          .array(
+            z
+              .object({
+                path: z.string().min(1),
+                url: z.string().url().nullable(),
+                refresh: z.boolean(),
+              })
+              .strict(),
+          )
+          .min(1)
+          .max(HOST_VIEWS_MAX_READS),
       })
       .strict(),
-    output: hostPullRequestLookupSchema,
+    output: z.array(hostPullRequestLookupSchema),
   },
   upstream: {
     input: z.object({ path: z.string().min(1) }).strict(),

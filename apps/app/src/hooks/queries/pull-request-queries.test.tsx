@@ -1,15 +1,13 @@
 // @vitest-environment jsdom
 
 import { cleanup, renderHook } from "@testing-library/react";
-import type {
-  EnvironmentPullRequest,
-  PullRequest,
-} from "bb-plugin-bb--github-pr-status/contract";
-import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   isEnvironmentPullRequestStale,
-  useEnvironmentPullRequest,
-} from "./pull-request-queries";
+  type EnvironmentPullRequest,
+  type PullRequest,
+} from "bb-plugin-bb--github-pr-status/contract";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { useEnvironmentPullRequest } from "./pull-request-queries";
 
 const keyedQuery = vi.hoisted(() => ({
   pluginEnabled: true,
@@ -146,21 +144,6 @@ describe("useEnvironmentPullRequest refreshes", () => {
     vi.setSystemTime(Date.now() + 51 * 60_000);
     await showPage();
     expect(keyedQuery.refetch).toHaveBeenCalledTimes(1);
-  });
-
-  it("sends one refetch when many rows show at once", async () => {
-    vi.useFakeTimers({ toFake: ["Date"] });
-    keyedQuery.data = { "env-a": row("open"), "env-b": row("open") };
-    renderHook(() => {
-      useEnvironmentPullRequest("env-a");
-      useEnvironmentPullRequest("env-b");
-    });
-    await settle();
-    expect(keyedQuery.refetch).toHaveBeenCalledTimes(1);
-
-    vi.setSystemTime(Date.now() + 31_000);
-    await showPage();
-    expect(keyedQuery.refetch).toHaveBeenCalledTimes(2);
   });
 
   it("does not refetch on mount before the row has loaded", async () => {
