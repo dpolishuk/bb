@@ -170,29 +170,23 @@ function buildPromptAreaElement({
   return (
     <QueryClientProvider client={testQueryClient}>
       <ThreadDetailPromptArea
-        showGitChanges={true}
         activeBackgroundCommands={[]}
         activePromptMode={activePromptMode}
         activeWorkflows={activeWorkflows}
-        canUseGitUi={false}
         childThreadsSection={childThreadsSection}
         composerFocusRequestNonce={0}
-        contextBannerMergeBase={null}
         canRestoreEnvironment={false}
         environmentGoneStatus={environmentGoneStatus}
         goal={goal}
         providerCommands={null}
         sessionOptions={sessionOptions}
         modelFallback={modelFallback}
-        isEnvironmentActionPending={false}
-        onChangedFileClick={vi.fn()}
         parentThreadSection={null}
         pendingInteractions={pendingInteractions}
         queuedMessageCount={queuedMessageCount}
         pendingTodos={null}
         projectId="proj_1"
-        pullRequest={null}
-        pullRequestMergeMethod="squash"
+        contextEnvironmentId={null}
         resolveMentionLink={() => null}
         sendMessage={{
           isPending: false,
@@ -201,8 +195,6 @@ function buildPromptAreaElement({
         sentMessageEdit={sentMessageEdit}
         steerActiveThreadOnEnter={false}
         thread={thread}
-        workspaceChangedFilesSection={null}
-        workspaceStatusPending={false}
       />
     </QueryClientProvider>
   );
@@ -409,12 +401,36 @@ describe("ThreadDetailPromptArea", () => {
       await mocks.composerSubmit?.({ pluginSubmission });
     });
 
-    expect(mocks.createQueuedMessageMutateAsync).not.toHaveBeenCalled();
     expect(mocks.sendMessageMutateAsync).toHaveBeenCalledWith(
       expect.objectContaining({
         id: "thr_1",
         mode: "queue-if-active",
         pluginSubmission,
+      }),
+    );
+  });
+
+  it("lets the server decide whether an Enter submitted while the thread looks busy queues", async () => {
+    mocks.promptDraft.text = "Try again";
+    renderPromptArea({
+      thread: makeThread({
+        runtime: { displayStatus: "stopping" },
+        status: "stopping",
+      }),
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Capture plugin host" }),
+    );
+
+    await act(async () => {
+      await mocks.composerSubmit?.();
+    });
+
+    expect(mocks.sendMessageMutateAsync).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "thr_1",
+        mode: "queue-if-active",
+        input: [{ type: "text", text: "Try again", mentions: [] }],
       }),
     );
   });
@@ -604,7 +620,6 @@ describe("ThreadDetailPromptArea", () => {
       input: [{ type: "text", text: "Edited request", mentions: [] }],
     });
     expect(mocks.promptDraft.clearIfCurrentMatches).not.toHaveBeenCalled();
-    expect(mocks.createQueuedMessageMutateAsync).not.toHaveBeenCalled();
 
     fireEvent.click(
       inlineEditor.getByRole("button", {
@@ -1696,7 +1711,6 @@ describe("ThreadDetailPromptArea", () => {
       ),
     );
     expect(mocks.sendMessageMutateAsync).not.toHaveBeenCalled();
-    expect(mocks.createQueuedMessageMutateAsync).not.toHaveBeenCalled();
   });
 
   it("creates a same-provider handoff with unchanged execution marked explicit", async () => {
@@ -1724,7 +1738,6 @@ describe("ThreadDetailPromptArea", () => {
       ),
     );
     expect(mocks.sendMessageMutateAsync).not.toHaveBeenCalled();
-    expect(mocks.createQueuedMessageMutateAsync).not.toHaveBeenCalled();
   });
 
   it("marks a supported handoff service tier explicit", async () => {
@@ -1953,7 +1966,6 @@ describe("ThreadDetailPromptArea", () => {
       }),
     );
     expect(mocks.sendMessageMutateAsync).not.toHaveBeenCalled();
-    expect(mocks.createQueuedMessageMutateAsync).not.toHaveBeenCalled();
     expect(mocks.promptDraft.clearIfCurrentMatches).toHaveBeenCalledTimes(1);
   });
 });

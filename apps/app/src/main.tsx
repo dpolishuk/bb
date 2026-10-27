@@ -4,6 +4,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter } from "react-router-dom";
 import { App } from "./App";
 import { AppErrorBoundary } from "./components/AppErrorBoundary";
+import { ApplicationUrlDialog } from "./components/ApplicationUrlDialog";
 import { AppToaster } from "./components/AppToaster";
 import { registerProviderCliInstallQueryClient } from "./components/provider-cli/provider-cli-install-store";
 import { initializePreferredTheme } from "./hooks/useTheme";
@@ -44,6 +45,7 @@ createRoot(document.getElementById("root")!, {
         <BrowserRouter>
           <App />
           <AppToaster />
+          <ApplicationUrlDialog />
         </BrowserRouter>
       </QueryClientProvider>
     </AppErrorBoundary>

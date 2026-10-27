@@ -1,3 +1,8 @@
+import { parseApplicationUrl } from "@bb/domain/application-url";
+import {
+  openApplicationUrl,
+  useApplicationLinksEnabled,
+} from "@/lib/application-url";
 import {
   Children,
   cloneElement,
@@ -37,7 +42,8 @@ import { LazyMarkdownHtml } from "./lazy-markdown-html";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
-import { ImageLightbox, getWrappedImageIndex } from "./image-lightbox.js";
+import { ImageLightbox } from "./image-lightbox.js";
+import { getWrappedImageIndex } from "@bb/shared-ui/lib/image-preview";
 import { InlineImageGalleryContext } from "./inline-image-gallery-context.js";
 import { remarkInlineDollarMath } from "./markdown-inline-dollar-math.js";
 import { normalizeMathFences } from "./markdown-math-fences.js";
@@ -182,6 +188,7 @@ interface ResolvedPromptMentions {
 }
 
 interface BuildLocalAwareUrlTransformArgs {
+  applicationLinksEnabled: boolean;
   fallbackUrlTransform: UrlTransform | undefined;
   localFileRouting: MarkdownLocalFileLinkRouting | undefined;
   localImageRouting: MarkdownLocalImageRouting | undefined;
@@ -434,7 +441,6 @@ function areMarkdownMessageDirectivesEqual({
   return (
     previous.registry === next.registry &&
     previous.openWorkspaceFile === next.openWorkspaceFile &&
-    previous.openThreadPanel === next.openThreadPanel &&
     previous.message.id === next.message.id &&
     previous.message.threadId === next.message.threadId &&
     previous.message.turnId === next.message.turnId &&
@@ -532,6 +538,7 @@ function resolveMarkdownLocalFileTarget(
 }
 
 function buildLocalAwareUrlTransform({
+  applicationLinksEnabled,
   fallbackUrlTransform,
   localFileRouting,
   localImageRouting,
@@ -565,6 +572,13 @@ function buildLocalAwareUrlTransform({
       }
     }
 
+    if (
+      key === "href" &&
+      node.tagName === "a" &&
+      applicationLinksEnabled &&
+      parseApplicationUrl(value) !== null
+    )
+      return value;
     return (fallbackUrlTransform ?? defaultUrlTransform)(value, key, node);
   };
 }
@@ -706,6 +720,12 @@ function MarkdownAnchor({
       return;
     }
 
+    if (parseApplicationUrl(rewrittenHref) !== null && rewrittenHref) {
+      event.preventDefault();
+      openApplicationUrl(rewrittenHref);
+      return;
+    }
+
     if (
       linkRouting?.onOpenLink &&
       rewrittenHref &&
@@ -730,6 +750,10 @@ function MarkdownAnchor({
       target="_blank"
       rel="noopener noreferrer"
       onClick={handleAnchorClick}
+      onAuxClick={(event) => {
+        if (event.button === 1 && parseApplicationUrl(rewrittenHref) !== null)
+          handleAnchorClick(event);
+      }}
     >
       {localFileLink
         ? appendMarkdownLinkIcon(
@@ -1818,6 +1842,7 @@ function MarkdownPreviewComponent({
   messageDirectives,
   urlTransform,
 }: MarkdownPreviewProps) {
+  const applicationLinksEnabled = useApplicationLinksEnabled();
   const preferredTheme = usePreferredTheme();
   const [rewriteLocalhostLinks] = useRewriteLocalhostLinksPreference();
   const [expandedImage, setExpandedImage] =
@@ -1884,7 +1909,6 @@ function MarkdownPreviewComponent({
       mounts,
       message: messageDirectives.message,
       openWorkspaceFile: messageDirectives.openWorkspaceFile,
-      openThreadPanel: messageDirectives.openThreadPanel,
       registry: messageDirectives.registry,
     };
   }, [messageDirectives]);
@@ -1962,14 +1986,18 @@ function MarkdownPreviewComponent({
   }, [baseRemarkPlugins, messageDirectiveMounts, codeFenceRegistry]);
   const resolvedUrlTransform = useMemo(
     () =>
-      localFileRouting || localImageRouting
-        ? buildLocalAwareUrlTransform({
-            fallbackUrlTransform: urlTransform,
-            localFileRouting,
-            localImageRouting,
-          })
-        : urlTransform,
-    [localFileRouting, localImageRouting, urlTransform],
+      buildLocalAwareUrlTransform({
+        applicationLinksEnabled,
+        fallbackUrlTransform: urlTransform,
+        localFileRouting,
+        localImageRouting,
+      }),
+    [
+      applicationLinksEnabled,
+      localFileRouting,
+      localImageRouting,
+      urlTransform,
+    ],
   );
 
   const rehypeKatex = useRehypeKatex(markdownMayContainMath(body));

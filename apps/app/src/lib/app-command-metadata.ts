@@ -54,6 +54,16 @@ export const APP_COMMAND_GROUPS: readonly AppCommandGroup[] = [
         "Archive the focused thread.",
       ),
       command(
+        "thread.markRead",
+        "Mark thread read or unread",
+        "Mark the focused thread read or unread.",
+      ),
+      command(
+        "thread.pin",
+        "Pin or unpin thread",
+        "Pin or unpin the focused thread.",
+      ),
+      command(
         "thread.previous",
         "Previous thread",
         "Open the previous visible sidebar thread.",
@@ -244,11 +254,6 @@ export const APP_COMMAND_GROUPS: readonly AppCommandGroup[] = [
         "file.quickOpen",
         "Quick open file",
         "Search workspace files in a new panel tab.",
-      ),
-      command(
-        "diff.toggle",
-        "Toggle diff",
-        "Open or close the environment diff.",
       ),
       command(
         "terminal.open",

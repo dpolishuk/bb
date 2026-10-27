@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+
+import { experimental_selectedSkillMentions as selectedSkillMentions } from "@get-bb/plugin-sdk/provider-bridge";
 import { ClaudeContextUsageCollector } from "./context-usage.js";
 import { readIsolatedClaudeContextUsage } from "./context-usage-probe.js";
 
@@ -33,7 +35,6 @@ import { randomUUID } from "node:crypto";
 import { join as joinPath, resolve as resolvePath } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import {
-  forkSession,
   type CanUseTool,
   type HookCallback,
   type PermissionResult,
@@ -61,6 +62,7 @@ import {
   type SdkSessionOptions,
 } from "./sdk-session.js";
 import { MissingClaudeCliError } from "./missing-cli-error.js";
+import { claudeConfigDirectory, forkClaudeSession } from "./session-fork.js";
 import { createClaudeCodeBridgeModelListMemo } from "./model-list.js";
 import {
   PROVIDER_COMMANDS_STATE_KIND,
@@ -102,6 +104,8 @@ import {
 import {
   createClaudeSkillPluginsRoot,
   ensureClaudeSkillPlugin,
+  filterClaudeSkillRoots,
+  claudeSkillsConfigDirectory,
 } from "./skill-plugins.js";
 import {
   buildBridgeMcpServer,
@@ -303,6 +307,7 @@ interface SessionConstructionConfig {
 }
 
 interface ClaudeLiveSessionSettings {
+  fullAccessApprovalsEnabled: boolean;
   memoryEnabled: boolean;
   model?: string;
   providerSubagentsEnabled: boolean;
@@ -369,7 +374,7 @@ function nextInteractiveRequestId(): string {
   interactiveRequestIdCounter += 1;
   return `interaction-${interactiveRequestIdCounter}`;
 }
-let configuredSkillRoots: ClaudeCodeSkillRoot[] | null = null;
+let configuredSkillRoots: { id: string; path: string }[] | null = null;
 let skillPluginsRoot: string | null = null;
 let bridgeTempDir: string | null = null;
 
@@ -1031,6 +1036,7 @@ function toInitialLiveSessionSettings(
   params: SessionConstructionParams,
 ): ClaudeLiveSessionSettings {
   return {
+    fullAccessApprovalsEnabled: params.fullAccessApprovalsEnabled,
     memoryEnabled: params.memoryEnabled ?? true,
     ...(params.model !== undefined ? { model: params.model } : {}),
     providerSubagentsEnabled: params.providerSubagentsEnabled ?? true,
@@ -1049,6 +1055,8 @@ function withTurnLiveSessionSettings(
   const model = params.model ?? current.model;
   const reasoningLevel = params.reasoningLevel ?? current.reasoningLevel;
   return {
+    fullAccessApprovalsEnabled:
+      params.fullAccessApprovalsEnabled ?? current.fullAccessApprovalsEnabled,
     memoryEnabled: params.memoryEnabled ?? current.memoryEnabled,
     ...(model !== undefined ? { model } : {}),
     providerSubagentsEnabled:
@@ -2167,7 +2175,8 @@ function createCanUseTool(threadIdRef: ThreadIdRef): CanUseTool {
 
     if (
       threadSession.attachment.permissionMode === "bypassPermissions" &&
-      !isBypassPermissionsAvailable()
+      (!isBypassPermissionsAvailable() ||
+        !threadSession.attachment.liveSettings.fullAccessApprovalsEnabled)
     ) {
       return {
         behavior: "allow",
@@ -2277,7 +2286,7 @@ async function handleRequest(request: ClaudeCodeJsonRpcRequest): Promise<void> {
       await handleThreadStart(
         request.id,
         claudeThreadStartParamsSchema.parse(
-          toClaudeSessionParams(request.params),
+          await toClaudeSessionParams(request.params),
         ),
       );
       break;
@@ -2285,7 +2294,7 @@ async function handleRequest(request: ClaudeCodeJsonRpcRequest): Promise<void> {
       await handleThreadResume(
         request.id,
         claudeThreadResumeParamsSchema.parse({
-          ...toClaudeSessionParams(request.params),
+          ...(await toClaudeSessionParams(request.params)),
           providerThreadId: request.params.providerThreadId,
         }),
       );
@@ -2294,7 +2303,7 @@ async function handleRequest(request: ClaudeCodeJsonRpcRequest): Promise<void> {
       await handleThreadFork(
         request.id,
         claudeThreadForkParamsSchema.parse({
-          ...toClaudeSessionParams(request.params),
+          ...(await toClaudeSessionParams(request.params)),
           sourceProviderThreadId: request.params.sourceProviderThreadId,
           ...(request.params.sourceProviderCheckpointId !== undefined
             ? {
@@ -2318,7 +2327,7 @@ async function handleRequest(request: ClaudeCodeJsonRpcRequest): Promise<void> {
       sendResult(request.id, await closeThreadForStop(request.params.threadId));
       break;
     case "skills/configure":
-      configuredSkillRoots = assembleSkillPlugins(request.params.roots);
+      configuredSkillRoots = request.params.roots;
       sendResult(request.id, { ok: true });
       break;
   }
@@ -2462,12 +2471,13 @@ async function handleThreadFork(
 
   let forkedProviderThreadId: string;
   try {
-    const forkResult = await forkSession(params.sourceProviderThreadId, {
-      ...(params.sourceProviderCheckpointId !== undefined
-        ? { upToMessageId: params.sourceProviderCheckpointId }
-        : {}),
+    forkedProviderThreadId = await forkClaudeSession({
+      configDirectory: claudeConfigDirectory(
+        buildSessionEnv(readConfigEnvOverrides(params.config)),
+      ),
+      sourceSessionId: params.sourceProviderThreadId,
+      upToMessageId: params.sourceProviderCheckpointId,
     });
-    forkedProviderThreadId = forkResult.sessionId;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     sendError(id, -32000, message);
@@ -2477,16 +2487,27 @@ async function handleThreadFork(
   attachThreadSession(id, params, forkedProviderThreadId, true);
 }
 
-function toClaudeSessionParams(
+async function toClaudeSessionParams(
   params: z.infer<typeof canonicalThreadStartParamsSchema>,
-): Record<string, unknown> {
+): Promise<Record<string, unknown>> {
+  const roots =
+    configuredSkillRoots === null
+      ? undefined
+      : assembleSkillPlugins(
+          await filterClaudeSkillRoots({
+            roots: configuredSkillRoots,
+            cwd: params.cwd,
+            pluginsRoot: requireSkillPluginsRoot(),
+            claudeDir: claudeSkillsConfigDirectory(),
+          }),
+        );
   return buildClaudeSessionParams({
     threadId: params.threadId,
     cwd: params.cwd,
     options: params.options,
     instructionMode: params.instructionMode,
     dynamicTools: params.dynamicTools,
-    skillRoots: configuredSkillRoots ?? undefined,
+    skillRoots: roots,
   });
 }
 
@@ -2662,18 +2683,8 @@ function normalizeClaudeSkillMentions(
   entry: Extract<z.infer<typeof promptInputItemSchema>, { type: "text" }>,
 ): string {
   const replacements = new Set<number>();
-  for (const mention of entry.mentions) {
-    const resource = mention.resource;
-    if (
-      resource.kind === "command" &&
-      resource.source === "skill" &&
-      resource.trigger === "$" &&
-      typeof resource.name === "string" &&
-      mention.end <= entry.text.length &&
-      entry.text.slice(mention.start, mention.end) === `$${resource.name}`
-    ) {
-      replacements.add(mention.start);
-    }
+  for (const mention of selectedSkillMentions(entry)) {
+    if (mention.resource.trigger === "$") replacements.add(mention.start);
   }
 
   let normalized = entry.text;

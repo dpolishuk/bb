@@ -1,8 +1,23 @@
 // @vitest-environment jsdom
 
+import {
+  createApplicationLinkApprovals,
+  APPLICATION_LINK_APPROVALS_STORAGE_KEY,
+} from "@bb/domain/application-link-approvals";
+import { ApplicationLinkApprovalsSettings } from "@/components/settings/ApplicationLinkApprovalsSettings";
+import { appQueryClient as approvalQueryClient } from "./app-query-client";
+
+import { LazyPluginMarkdown } from "@/components/plugin/lazy-plugin-renderers";
 import { LazyMarkdownHtml } from "@/components/ui/lazy-markdown-html";
 
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import { beforeAll, afterEach, describe, expect, it, vi } from "vitest";
@@ -11,12 +26,14 @@ import { ThreadTimelineNavigationProvider } from "@/components/thread/timeline/T
 import { pluginSdkAppImplementation } from "./plugin-sdk-app-impl";
 import { AppNavigationHostProvider } from "./app-navigation-host";
 
-beforeAll(() => LazyMarkdownHtml.preload());
+beforeAll(() =>
+  Promise.all([LazyMarkdownHtml.preload(), LazyPluginMarkdown.preload()]),
+);
 
 afterEach(cleanup);
 
 describe("plugin SDK Markdown", () => {
-  it("uses the surrounding thread detail navigation for file and web links", () => {
+  it("uses the surrounding thread detail navigation for file and web links", async () => {
     const onOpenLink = vi.fn(() => false);
     const openUrl = vi.fn(() => true);
     const onOpenLocalFileLink = vi.fn(() => true);
@@ -37,7 +54,7 @@ describe("plugin SDK Markdown", () => {
       </AppNavigationHostProvider>,
     );
 
-    const fileLink = screen.getByRole("link", { name: "README" });
+    const fileLink = await screen.findByRole("link", { name: "README" });
     expect(fileLink.getAttribute("href")).toBe("file:///workspace/README.md");
     fireEvent.click(fileLink);
     expect(onOpenLocalFileLink).toHaveBeenCalledWith({
@@ -58,7 +75,7 @@ describe("plugin SDK Markdown", () => {
 
   it.each(["workspace", "thread-storage"] as const)(
     "resolves nested %s document destinations independently of message context",
-    (kind) => {
+    async (kind) => {
       const openFilePreview = vi.fn(() => true);
       const openUrl = vi.fn(() => true);
       const Markdown = pluginSdkAppImplementation.Markdown;
@@ -96,7 +113,7 @@ describe("plugin SDK Markdown", () => {
           </ThreadTimelineNavigationProvider>
         </AppNavigationHostProvider>,
       );
-      fireEvent.click(screen.getByRole("link", { name: "Sibling" }));
+      fireEvent.click(await screen.findByRole("link", { name: "Sibling" }));
       expect(openFilePreview).toHaveBeenLastCalledWith({
         target: { ...target, path: "reports/nested/sibling.md" },
         location: { kind: "range", startLine: 2, endLine: 4 },
@@ -128,7 +145,7 @@ describe("plugin SDK Markdown", () => {
     },
   );
 
-  it("keeps escaping relative paths out of file navigation and preserves absolute links", () => {
+  it("keeps escaping relative paths out of file navigation and preserves absolute links", async () => {
     const openFilePreview = vi.fn(() => true);
     const onOpenLocalFileLink = vi.fn(() => true);
     const Markdown = pluginSdkAppImplementation.Markdown;
@@ -158,7 +175,9 @@ describe("plugin SDK Markdown", () => {
       </AppNavigationHostProvider>,
     );
     expect(
-      screen.getByRole("link", { name: "Escape" }).getAttribute("href"),
+      (await screen.findByRole("link", { name: "Escape" })).getAttribute(
+        "href",
+      ),
     ).toBe("../../../outside.md");
     expect(
       screen.getByRole("img", { name: "Escape" }).getAttribute("src"),
@@ -175,7 +194,7 @@ describe("plugin SDK Markdown", () => {
     ).toBe("/api/v1/threads/thr_document/host-files/outside.svg");
   });
 
-  it("routes web links without requiring a thread navigation context", () => {
+  it("routes web links without requiring a thread navigation context", async () => {
     const openUrl = vi.fn(() => true);
     const Markdown = pluginSdkAppImplementation.Markdown;
     render(
@@ -183,7 +202,7 @@ describe("plugin SDK Markdown", () => {
         <Markdown content="[Docs](https://example.com/docs)" />
       </AppNavigationHostProvider>,
     );
-    fireEvent.click(screen.getByRole("link", { name: "Docs" }));
+    fireEvent.click(await screen.findByRole("link", { name: "Docs" }));
     expect(openUrl).toHaveBeenCalledWith({ url: "https://example.com/docs" });
   });
 });
@@ -247,4 +266,62 @@ describe("plugin SDK navigation components", () => {
       location: null,
     });
   });
+});
+
+describe("application approval management", () => {
+  afterEach(() => {
+    localStorage.removeItem(APPLICATION_LINK_APPROVALS_STORAGE_KEY);
+    approvalQueryClient.clear();
+  });
+
+  it.each(["settings", "plugin"] as const)(
+    "revokes through %s and updates the shared settings list",
+    async (surface) => {
+      const store = createApplicationLinkApprovals({
+        read: () =>
+          localStorage.getItem(APPLICATION_LINK_APPROVALS_STORAGE_KEY),
+        write: (value) =>
+          localStorage.setItem(APPLICATION_LINK_APPROVALS_STORAGE_KEY, value),
+      });
+      store.allow("linear", store.revision());
+      store.allow("reflect", store.revision());
+      render(
+        <QueryClientProvider client={approvalQueryClient}>
+          <ApplicationLinkApprovalsSettings />
+        </QueryClientProvider>,
+      );
+      await screen.findByRole("button", { name: "Remove linear approval" });
+      if (surface === "settings") {
+        fireEvent.click(
+          screen.getByRole("button", { name: "Remove linear approval" }),
+        );
+      } else {
+        await act(() =>
+          pluginSdkAppImplementation.experimental_revokeApplicationLinkApproval(
+            "linear",
+          ),
+        );
+      }
+      await waitFor(() =>
+        expect(
+          screen.queryByRole("button", { name: "Remove linear approval" }),
+        ).toBeNull(),
+      );
+      expect(
+        await pluginSdkAppImplementation.experimental_getApplicationLinkApprovals(),
+      ).toEqual(["reflect"]);
+      if (surface === "settings")
+        fireEvent.click(
+          screen.getByRole("button", { name: "Remove reflect approval" }),
+        );
+      else
+        await act(() =>
+          pluginSdkAppImplementation.experimental_revokeApplicationLinkApproval(
+            null,
+          ),
+        );
+      await screen.findByText(/^No apps are always allowed\./u);
+      expect(store.list()).toEqual([]);
+    },
+  );
 });

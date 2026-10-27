@@ -27,6 +27,58 @@ Launcher status output is plain when stdout is redirected, including in CI.
 Set `FORCE_COLOR=1` to request color or `NO_COLOR=1` to disable it; `NO_COLOR`
 takes precedence. In-place progress updates require a stdout TTY.
 
+## Outbound proxies and trusted certificates
+
+The packaged server and daemon launchers start bb's own Node processes with
+`--use-system-ca` and `--use-env-proxy`, and bb's forked workers and provider
+bridge workers inherit them.
+The flags are not exported as environment variables, so terminals, provider
+CLIs, and agent shells keep the Node networking defaults of the user's
+environment. `--use-system-ca` adds OS-managed certificate authorities to Node's
+bundled roots; `NODE_EXTRA_CA_CERTS` still adds a PEM bundle. Set
+`NODE_USE_SYSTEM_CA=0` or `NODE_USE_ENV_PROXY=0` before launch to opt out.
+
+Set `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY` (or their lowercase forms) in the
+launch environment or with `bb-app env set`. Include `localhost,127.0.0.1,::1`
+in `NO_PROXY` to keep local bb connections direct. Restart bb after changing
+these settings; existing sockets and workers keep their startup configuration.
+
+Built-in proxy support requires Node 22.21+ or 24.5+ (or Node 26); on older
+supported Node releases the launcher omits `--use-env-proxy`. Libraries that create their own agents
+or sockets can also bypass Node's global proxy support, including daemon
+WebSockets; these launch defaults do not configure those libraries or the OS
+proxy settings.
+
+## Host executable discovery
+
+Core process launches and the Plugin SDK process helpers share one resolver.
+It reads the user's login-shell PATH (or Windows user/machine registry PATH),
+and adds the running Node's directory and standard user tool directories to
+every child PATH. When the PATH is the one bb started with, the login-shell
+PATH comes first; when a caller passes a different PATH, its entries come first
+and the login-shell PATH and standard directories follow. Native provider
+installs in `~/.local/bin` and
+mise/asdf shim directories are available to services as well as terminal launches.
+Shell network settings are read alongside PATH; unrelated shell variables are
+not copied into child environments. Discovery runs in the background, bounded to
+three seconds per probe; launches use the latest completed snapshot and never
+wait for a probe. The server, daemon, and packaged desktop app start discovery
+at launch; the `bb` CLI does not.
+
+Missing-command errors and exit 127 start a background refresh, and later
+launches use its result; commands are never replayed automatically because an
+exit 127 can happen after an installation has already changed files. An
+unavailable running Node path is re-resolved before launching a worker, and
+replacement runtimes must match its native-module ABI and Electron/Node family.
+Scripts with a `#!/usr/bin/env node` line run with the `node` found on PATH.
+`npm` and `npx` run as found on PATH. Daemon self-update instead runs npm's
+JavaScript entry point with the Node installation that owns it, which avoids
+version-manager wrapper post-hooks; inside the Electron desktop runtime, bb
+never substitutes its own runtime for npm.
+
+Standalone machine bootstrap installers run before the shared runtime is
+installed, so their initial Node/package acquisition remains self-contained.
+
 ## Repository worktree hooks
 
 Commit `.bb-env-setup.sh` when a managed worktree needs repository setup.
@@ -413,6 +465,10 @@ chat-pane focus). These start unassigned on Windows/Linux to preserve native
 Control-arrow editing. `pane.focus.previous` / `pane.focus.next` and
 `panel.fullScreen.toggle` start unassigned.
 
+`thread.rename`, `thread.archive`, `thread.markRead`, and `thread.pin` start
+unassigned and act on the focused pane's open thread; Mark read and Pin toggle
+like the matching thread menu item.
+
 | Area      | Command                                      | Default                     | Availability             |
 | --------- | -------------------------------------------- | --------------------------- | ------------------------ |
 | Palette   | Quick palette                                | `Mod+Shift+P`               | All clients              |
@@ -421,6 +477,8 @@ Control-arrow editing. `pane.focus.previous` / `pane.focus.next` and
 | Threads   | Search threads                               | `Mod+K`                     | All clients              |
 | Threads   | Rename focused thread                        | Unassigned                  | Thread view              |
 | Threads   | Archive focused thread                       | Unassigned                  | Thread view              |
+| Threads   | Mark focused thread read or unread           | Unassigned                  | Thread view              |
+| Threads   | Pin or unpin focused thread                  | Unassigned                  | Thread view              |
 | Threads   | Previous / next thread                       | Surface defaults above      | Desktop / web            |
 | Threads   | Open visible thread 1–9                      | Platform defaults above     | Web / desktop            |
 | Layout    | Previous / next chat pane                    | Unassigned                  | While split              |
@@ -580,6 +638,27 @@ User-level skills live under `<dataDir>/skills/<name>/SKILL.md` (usually
 `<workspace>/.bb/skills/<name>/SKILL.md`. Enabled plugins contribute
 `skills/<name>/SKILL.md` (relocatable with the manifest's `bb.skills` field).
 Project skills override user skills, which override plugin skills, by name.
+
+All skill discovery uses the shared skills index. User roots, skill directories,
+and `SKILL.md` entries may be symlinks. Project skills and Markdown commands may
+follow links only within their workspace (or the repository boundary for an
+ancestor root). Traversal resolves real paths and stops cycles. Each recursive
+skill root reads at most 1,000 folders and each command root at most 1,000
+entries; files inside skill folders do not count. Supporting files in an
+injected skill tree must remain ordinary files and directories; linking the root
+or `SKILL.md` is supported.
+
+`bb skill list`, the SDK, and the Skills page collapse registrations that share a
+name and identical `SKILL.md` bytes, preferring provider-neutral and user-wide
+registrations. Different contents with the same name, and identical contents under
+different names, remain distinct. Previously issued registration IDs still address
+their original registration. Linked registrations are read-only in bb. Runtime
+catalogs collapse skills with the same name and identical trees, and Claude Code
+omits injected copies already visible under the same name in its native user or
+project roots. Selected Codex skills are sent as structured skill inputs with the
+path from Codex's active catalog, matched by catalog name or skill directory name,
+for both starting and steering a turn; a selected skill missing from that
+catalog is sent as plain text only.
 
 Top-level `sharedSkillRoots` in `~/.bb/config.json` adds one provider-neutral
 skill collection: `{"user": [...], "project": [...]}` relative paths, resolved
@@ -773,11 +852,15 @@ bb stores only the experiments you set; the others follow the shipped default.
 The `earlyAdopter` general setting (the Become an early adopter banner on
 Settings → Experiments, `bb settings general earlyAdopter on`) switches the
 shipped default to the early adopter default: experiments marked Early adopter
-(currently `timelinePush` and `compactExpiredCache`) turn on, and the rest stay
+(currently `applicationLinks`, `timelinePush`, `compactExpiredCache`, and `sidebarMultiSelect`) turn on, and the rest stay
 off. An experiment you set yourself keeps your value either way.
 `/system/config` and `sdk.system.config()` return the resolved values in
 `experiments`.
 
+- `applicationLinks` (on for early adopters) enables explicit app links such as
+  `linear://` and `slack://` in rendered Markdown and the plugin
+  `navigate.openUrl` path. The viewing device asks before opening unless the
+  scheme was saved with Always allow. See [App links](#app-links).
 - `changelogPreview` shows the latest release notes as a dismissible card on
   Settings → Updates.
 - `compactExpiredCache` (on for early adopters) reports `compactionOfferAt` on a thread's context
@@ -803,12 +886,34 @@ off. An experiment you set yourself keeps your value either way.
   collection. The experiment itself applies live; turning it off restores
   normal logging and flushes the in-flight profile, keeping saved files. See
   [diagnostics](debugging-and-qa.md#opt-in-server-performance-diagnostics).
+- `sidebarMultiSelect` (on for early adopters) lets the built-in thread list
+  select several threads: Cmd/Ctrl+Shift-click toggles a row (starting from the
+  open thread), Shift-click selects the visible range from the last clicked row,
+  and a plain click, Cmd/Ctrl-click, Escape, or a click outside the sidebar
+  clears the selection.
+  Right-clicking a selected row offers Mark read/unread, Pin/Unpin,
+  Notifications, Move to section, Archive (Unarchive when every selected
+  thread is archived), and Delete for the whole selection. Archive and Delete
+  ask once for the whole selection, counting child threads that are not
+  selected, and act on the topmost selected threads; Archive skips the
+  question when the Archive confirmation setting is off. Dragging a selected row moves
+  every selected thread onto a section, under a thread, or into Pinned, or drops
+  them onto a composer as one mention per thread. Cmd/Ctrl-click still opens a
+  thread in a split. Plugins read it with
+  `experimental_useExperiment("sidebarMultiSelect")`.
 - `timelinePush` makes an open thread view subscribe to its latest timeline
   window over the WebSocket (`thread-timeline` subscription target); the server
   pushes the full window once, then row deltas after new events, instead of the
   client refetching the latest window after every update. A missed push falls
   back to the delta request used when it is off. Open views follow a toggle
   live.
+- `unreadDividerAtAnswer` moves the NEW divider in an unread thread from the
+  first row after your read point to the answer of a turn that finished while
+  you were away: the turn's final assistant message, or the error that ended
+  it. The turn's tool calls and in-between notes stay above the divider. A
+  message that started a new turn keeps the divider above it, a turn that is
+  still running or has no answer keeps the old placement, and the divider never
+  lands on your own message. It applies the next time you open a thread.
 
 ## Thread Timeline Window
 
@@ -894,16 +999,17 @@ skills.
 
 ### Claude Code provider
 
-| Setting            | Default | Effect                                                                                                                                                                                                                                                                |
-| ------------------ | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `disable1MContext` | `false` | Sets `CLAUDE_CODE_DISABLE_1M_CONTEXT=1` (`0` when off).                                                                                                                                                                                                               |
-| `chromeEnabled`    | `false` | Starts Claude Code with `--chrome` for Claude in Chrome tools, which bb otherwise leaves off even when the interactive `claude` CLI enables them; the host needs the extension and a claude.ai login (API-key sessions stay off).                                     |
-| `artifactsEnabled` | `false` | Sets `CLAUDE_CODE_ARTIFACT=1` so Claude Code loads its Artifact tools (read, publish, and edit claude.ai artifacts), which it withholds from SDK sessions by default; when off, bb leaves any inherited value alone. Claude may publish private pages without asking. |
-| `sandboxEnabled`   | `true`  | Runs Bash in Claude Code's sandbox in Accept Edits and Approve for me modes; `false` uses Claude Code's own approvals and sandbox settings.                                                                                                                           |
+| Setting                      | Default | Effect                                                                                                                                                                                                                                                                |
+| ---------------------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `disable1MContext`           | `false` | Sets `CLAUDE_CODE_DISABLE_1M_CONTEXT=1` (`0` when off).                                                                                                                                                                                                               |
+| `chromeEnabled`              | `false` | Starts Claude Code with `--chrome` for Claude in Chrome tools, which bb otherwise leaves off even when the interactive `claude` CLI enables them; the host needs the extension and a claude.ai login (API-key sessions stay off).                                     |
+| `artifactsEnabled`           | `false` | Sets `CLAUDE_CODE_ARTIFACT=1` so Claude Code loads its Artifact tools (read, publish, and edit claude.ai artifacts), which it withholds from SDK sessions by default; when off, bb leaves any inherited value alone. Claude may publish private pages without asking. |
+| `sandboxEnabled`             | `true`  | Runs Bash in Claude Code's sandbox in Accept Edits and Approve for me modes; `false` uses Claude Code's own approvals and sandbox settings.                                                                                                                           |
+| `fullAccessApprovalsEnabled` | `false` | Shows Claude Code's own prompts in Full Access (`permissions.ask` rules, PreToolUse hooks that answer `ask`, and built-in safety checks); `false` approves every request. Applies from the next turn without a restart.                                               |
 
-Set them with `bb plugin config provider-claude-code set <key> <value>`. A
-change restarts the thread's Claude process before its next turn, keeping the
-conversation. Memory, native subagents, and the Workflow tool are toggled on
+Set them with `bb plugin config provider-claude-code set <key> <value>`. Unless
+noted, a change restarts the thread's Claude process before its next turn,
+keeping the conversation. Memory, native subagents, and the Workflow tool are toggled on
 the provider's page in Settings → Providers (see `bb guide providers`).
 
 Two host-daemon environment variables reach the Claude Code bridge:
@@ -1244,3 +1350,29 @@ metadata is preserved. This is a desktop-local preference, with no server
 settings CLI/SDK endpoint. Builds with tolerant readers ignore the field and
 may drop it on save; older strict readers can reject the whole file, so keep a
 backup before rolling back to a build predating the tolerant-reader fix #5286.
+
+## App links
+
+Enable App links in Settings → Experiments or run
+`bb settings experiment applicationLinks true`. The experiment is a server
+setting shared by its clients. Disable it with
+`bb settings experiment applicationLinks false`.
+
+Explicit Markdown links such as `[Review note](reflect://note/Project%20X)`
+become clickable while enabled. Bare custom-scheme text is not auto-linked.
+The shared web UI asks before opening an app on the viewing device; choose
+Always allow to remember that URL scheme. All clients save approvals in
+localStorage for this BB site on this device. They do not sync between devices,
+browsers, app profiles, or server addresses. Settings → General → Links → App links lists
+saved schemes; the trash button next to a scheme revokes it.
+The Plugin SDK can list and revoke through the same implementation; it cannot
+grant approval. There is no server-side or local-desktop-profile approval store.
+
+Desktop and mobile validate the URL again and hand it to the OS after the web
+UI approves it. Native code does not show a second confirmation or store
+permissions. Failed native launches do not save new approvals. Resetting
+approvals invalidates pending remember choices. Old native clients show an
+update message. Web browsers control their own handoff and may show a second
+prompt; BB cannot reliably detect missing apps in a browser. Executable web
+schemes, local-file launch schemes, and reserved editor-action schemes remain
+blocked.

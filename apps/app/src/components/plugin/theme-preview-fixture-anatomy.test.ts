@@ -148,14 +148,23 @@ const VIEW_FIXTURE_ANCHORS: Record<string, readonly FixtureAnchor[]> = {
     },
     {
       file: "apps/app/src/components/secondary-panel/ThreadMetadataContent.tsx",
+      mustContain: ['appearance="flat"', "<EnvironmentRow"],
+      because:
+        "The open Info panel projects BB's flat metadata card and a representative environment row.",
+    },
+    {
+      file: "plugins/git/ui/info/GitInfoRows.tsx",
+      mustContain: ['<DetailRow icon="GitBranch"'],
+      because:
+        "The open Info panel's branch row comes from the Git plugin.",
+    },
+    {
+      file: "plugins/github-pr-status/ui/PullRequestInfoRow.tsx",
       mustContain: [
-        'appearance="flat"',
-        "<EnvironmentRow",
-        "<BranchRow",
-        "<PullRequestRow",
+        '<DetailRow icon="GitPullRequestArrow" label="Pull request">',
       ],
       because:
-        "The open Info panel projects BB's flat metadata card and representative environment, branch, and pull-request rows.",
+        "The GitHub PR Status plugin draws the Info panel's pull-request row.",
     },
     {
       file: "apps/app/src/components/promptbox/follow-up-placeholder.ts",

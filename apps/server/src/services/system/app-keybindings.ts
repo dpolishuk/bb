@@ -1,13 +1,11 @@
-import type {
-  AppCommandContextKey,
-  AppCommandId,
-  AppDefaultKeybinding,
-  AppDefaultKeybindings,
-  AppKeybinding,
-  AppKeybindings,
-  AppShortcut,
-} from "@bb/domain";
 import {
+  type AppCommandContextKey,
+  type AppCommandId,
+  type AppDefaultKeybinding,
+  type AppDefaultKeybindings,
+  type AppKeybinding,
+  type AppKeybindings,
+  type AppShortcut,
   QUESTION_SELECT_APP_COMMAND_IDS,
   PANE_FOCUS_APP_COMMAND_IDS,
   THREAD_JUMP_APP_COMMAND_IDS,
@@ -171,6 +169,8 @@ export const DEFAULT_APP_KEYBINDINGS: AppDefaultKeybindings = [
   binding("thread.search", "k", { mod: true }, mainWithoutModal),
   unassignedBinding("thread.rename", mainWithoutModal),
   unassignedBinding("thread.archive", mainWithoutModal),
+  unassignedBinding("thread.markRead", mainWithoutModal),
+  unassignedBinding("thread.pin", mainWithoutModal),
   binding("app.back", "Escape", {}, mainWithoutModal),
   binding("settings.open", ",", { mod: true }, mainWithoutModal),
   binding("sidebar.toggle", "\\", { mod: true }, mainWithoutModal),
@@ -272,15 +272,6 @@ export const DEFAULT_APP_KEYBINDINGS: AppDefaultKeybindings = [
   binding("panel.toggle", "j", { mod: true }, mainWithoutModal),
   unassignedBinding("panel.fullScreen.toggle", mainWithoutModal),
   binding("file.quickOpen", "p", { mod: true }, mainWithoutModal),
-  binding(
-    "diff.toggle",
-    "d",
-    { mod: true },
-    {
-      ...mainWithoutModal,
-      none: ["modalOpen", "editableFocus", "terminalFocus", "browserFocus"],
-    },
-  ),
   binding(
     "terminal.open",
     "Enter",
