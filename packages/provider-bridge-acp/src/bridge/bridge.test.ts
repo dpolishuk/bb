@@ -983,25 +983,6 @@ describe("acp bridge", () => {
     },
   );
 
-  it("forwards additional workspace write roots to agents advertising additionalDirectories", async () => {
-    const requestLog = join(workspaceDir, "additional-directories.jsonl");
-    await startThread({
-      additionalWorkspaceWriteRoots: ["/tmp/bb-extra-root"],
-      envVars: {
-        FAKE_ACP_ADDITIONAL_DIRECTORIES: "1",
-        FAKE_ACP_REQUEST_LOG: requestLog,
-      },
-    });
-
-    const sessionNew = loggedAcpRequests(requestLog).find(
-      (request) => request.method === "session/new",
-    );
-    expect(sessionNew?.params).toMatchObject({
-      cwd: workspaceDir,
-      additionalDirectories: ["/tmp/bb-extra-root"],
-    });
-  });
-
   it("omits additionalDirectories for agents without the capability", async () => {
     const requestLog = join(workspaceDir, "no-additional-directories.jsonl");
     await startThread({
@@ -1019,28 +1000,41 @@ describe("acp bridge", () => {
     requestMethod: string;
     sessionMethod: string;
     capabilityEnv: Record<string, string>;
+    sourceSession: Record<string, string>;
   }>([
+    {
+      requestMethod: "thread/start",
+      sessionMethod: "session/new",
+      capabilityEnv: {},
+      sourceSession: {},
+    },
     {
       requestMethod: "thread/fork",
       sessionMethod: "session/fork",
       capabilityEnv: { FAKE_ACP_FORK_SESSION: "1" },
+      sourceSession: { sourceProviderThreadId: "dirs-source-session" },
     },
     {
       requestMethod: "thread/resume",
       sessionMethod: "session/load",
       capabilityEnv: { FAKE_ACP_LOAD_SESSION: "1" },
+      sourceSession: { providerThreadId: "dirs-source-session" },
     },
     {
       requestMethod: "thread/resume",
       sessionMethod: "session/resume",
       capabilityEnv: { FAKE_ACP_RESUME_SESSION: "1" },
+      sourceSession: { providerThreadId: "dirs-source-session" },
     },
   ])(
     "forwards additional workspace write roots on $sessionMethod when advertised",
-    async ({ requestMethod, sessionMethod, capabilityEnv }) => {
-      const requestLog = join(workspaceDir, `${sessionMethod.replace("/", "-")}-dirs.jsonl`);
+    async ({ requestMethod, sessionMethod, capabilityEnv, sourceSession }) => {
+      const requestLog = join(
+        workspaceDir,
+        `${sessionMethod.replace("/", "-")}-dirs.jsonl`,
+      );
       const id = sendRequest(requestMethod, {
-        threadId: `dirs-${requestMethod.replace("/", "-")}`,
+        threadId: `dirs-${sessionMethod.replace("/", "-")}`,
         cwd: workspaceDir,
         instructionMode: "append",
         options: executionOptions({
@@ -1055,9 +1049,7 @@ describe("acp bridge", () => {
             additionalWorkspaceWriteRoots: ["/tmp/bb-extra-root"],
           },
         }),
-        ...(requestMethod === "thread/resume"
-          ? { providerThreadId: "dirs-source-session" }
-          : { sourceProviderThreadId: "dirs-source-session" }),
+        ...sourceSession,
       });
       const response = await waitForResponse(id);
       expect(response.error).toBeUndefined();
@@ -1065,6 +1057,7 @@ describe("acp bridge", () => {
         (request) => request.method === sessionMethod,
       );
       expect(forwarded?.params).toMatchObject({
+        cwd: workspaceDir,
         additionalDirectories: ["/tmp/bb-extra-root"],
       });
     },

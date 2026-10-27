@@ -886,7 +886,10 @@ async function handleMessage(message) {
           agentCapabilities: {
             loadSession,
             promptCapabilities: { image: false },
-            ...(forkSession || resumeSession || deleteSession || additionalDirectories
+            ...(forkSession ||
+            resumeSession ||
+            deleteSession ||
+            additionalDirectories
               ? {
                   sessionCapabilities: {
                     ...(forkSession ? { fork: {} } : {}),

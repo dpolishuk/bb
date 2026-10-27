@@ -2244,9 +2244,11 @@ function additionalSessionDirectories(
   params: AcpSessionParams,
   capabilities: AcpAgentCapabilities,
 ): { additionalDirectories?: string[] } {
-  const directories = params.additionalDirectories ?? [];
+  const directories = params.workspaceWriteRoots.filter(
+    (root) => root !== params.cwd,
+  );
   return directories.length > 0 && capabilities.session.additionalDirectories
-    ? { additionalDirectories: [...directories] }
+    ? { additionalDirectories: directories }
     : {};
 }
 
@@ -3204,13 +3206,12 @@ function reconcileExecutionSettings(
           ...options.envVars,
         }
       : session.construction.envVars;
-  const additionalWorkspaceWriteRoots =
-    options.providerOptions?.additionalWorkspaceWriteRoots !== undefined
-      ? decodeAdditionalWorkspaceWriteRoots(options.providerOptions)
-      : undefined;
   const workspaceWriteRoots =
-    additionalWorkspaceWriteRoots !== undefined
-      ? [session.cwd, ...additionalWorkspaceWriteRoots]
+    options.providerOptions?.additionalWorkspaceWriteRoots !== undefined
+      ? [
+          session.cwd,
+          ...decodeAdditionalWorkspaceWriteRoots(options.providerOptions),
+        ]
       : session.policy.workspaceWriteRoots;
   const modelParams =
     launchSpec === null
@@ -3229,14 +3230,6 @@ function reconcileExecutionSettings(
     envVars,
     permissionMode: options.permissionMode,
     workspaceWriteRoots,
-    ...(additionalWorkspaceWriteRoots !== undefined
-      ? {
-          additionalDirectories:
-            additionalWorkspaceWriteRoots.length > 0
-              ? [...additionalWorkspaceWriteRoots]
-              : undefined,
-        }
-      : {}),
   };
   const launchModelChanged = !isDeepStrictEqual(
     launchModelSelection(session.construction),
