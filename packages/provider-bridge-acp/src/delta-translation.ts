@@ -613,7 +613,10 @@ export function createAcpDeltaTranslator(
       deltas.push(
         toolCallClose({
           context,
-          event: open.event,
+          event: {
+            ...open.event,
+            status: status === "interrupted" ? "cancelled" : status,
+          },
           status,
           permissionTitle: open.permissionTitle,
           delegation: open.delegation,

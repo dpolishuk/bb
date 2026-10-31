@@ -8,6 +8,7 @@ import {
   ACP_COMPACTION_COMPLETED_METHOD,
   ACP_COMPACTION_STARTED_METHOD,
   ACP_FS_WRITE_METHOD,
+  ACP_PROMPT_INTERRUPTED_METHOD,
   ACP_TURN_COMPLETED_METHOD,
   ACP_TURN_STARTED_METHOD,
   ACP_UPDATE_METHOD,
@@ -17,8 +18,7 @@ import {
   createAcpDeltaTranslator,
   type AcpDeltaTranslator,
 } from "./delta-translation.js";
-import { resolveAcpDialect } from "./dialect.js";
-import type { AcpDialect } from "./dialect.js";
+import { resolveAcpDialect, type AcpDialect } from "./dialect.js";
 import { ACP_TOOL_PAYLOAD_MAX_CHARS } from "./tool-classification.js";
 import type { AcpToolCallUpdateEvent } from "./wire.js";
 
@@ -2933,9 +2933,9 @@ describe("acp dialect tool call event normalization", () => {
       argumentEchoUpdate('{"prompt": "Compute'),
       { threadId: THREAD_ID },
     );
-    expect(
-      deltas.filter((delta) => delta.kind === "item.progress"),
-    ).toEqual([]);
+    expect(deltas.filter((delta) => delta.kind === "item.progress")).toEqual(
+      [],
+    );
   });
 
   it("emits progress text the dialect rewrites", () => {
@@ -2989,8 +2989,101 @@ describe("acp dialect tool call event normalization", () => {
     );
     const close = deltas.find((delta) => delta.kind === "item.close");
     expect(close).toBeDefined();
-    expect(
-      (close as { resultText?: string }).resultText,
-    ).toBeUndefined();
+    expect(close?.resultText).toBeUndefined();
+  });
+
+  describe.each([
+    { name: "Agent", kind: "other", rawInput: { prompt: "Compute 2+2" } },
+    { name: "Bash", kind: "execute", rawInput: { command: "echo hello" } },
+  ] as const)("forced $name close", ({ name, kind, rawInput }) => {
+    it.each([
+      {
+        name: "cancelled turn",
+        event: turnCompletedEvent("cancelled"),
+        acpStatus: "cancelled",
+        itemStatus: "interrupted",
+      },
+      {
+        name: "prompt interruption",
+        event: {
+          jsonrpc: "2.0",
+          method: ACP_PROMPT_INTERRUPTED_METHOD,
+          params: { threadId: THREAD_ID },
+        },
+        acpStatus: "cancelled",
+        itemStatus: "interrupted",
+      },
+      {
+        name: "completed turn",
+        event: turnCompletedEvent("end_turn"),
+        acpStatus: "completed",
+        itemStatus: "completed",
+      },
+    ])(
+      "settles the normalizer on $name",
+      ({ event, acpStatus, itemStatus }) => {
+        const activeCalls = new Set<string>();
+        const statuses: AcpToolCallUpdateEvent["status"][] = [];
+        function normalize(
+          event: AcpToolCallUpdateEvent,
+        ): AcpToolCallUpdateEvent {
+          statuses.push(event.status);
+          if (
+            event.status === "completed" ||
+            event.status === "failed" ||
+            event.status === "cancelled"
+          ) {
+            activeCalls.delete(event.toolCallId);
+          } else if (activeCalls.has(event.toolCallId)) {
+            return event;
+          } else {
+            activeCalls.add(event.toolCallId);
+          }
+          const { content: _content, ...rest } = event;
+          return rest;
+        }
+        const translator = normalizingTranslator({
+          id: "test",
+          normalizeCommandEvent: normalize,
+          normalizeToolCallEvent: normalize,
+        });
+        const context = { threadId: THREAD_ID };
+        translator.translateAcpEvent(turnStartedEvent(), context);
+        translator.translateAcpEvent(
+          updateEvent({
+            sessionUpdate: "tool_call",
+            toolCallId: "call-normalized",
+            title: name,
+            kind,
+            status: "pending",
+            rawInput,
+          }),
+          context,
+        );
+        translator.translateAcpEvent(
+          updateEvent({
+            sessionUpdate: "tool_call_update",
+            toolCallId: "call-normalized",
+            status: "in_progress",
+            rawInput,
+            content: [
+              {
+                type: "content",
+                content: { type: "text", text: JSON.stringify(rawInput) },
+              },
+            ],
+          }),
+          context,
+        );
+        const deltas = translator.translateAcpEvent(event, context);
+        const close = deltas.find((delta) => delta.kind === "item.close");
+
+        expect(statuses).toEqual(["in_progress", acpStatus]);
+        expect(activeCalls.size).toBe(0);
+        expect(close).toMatchObject({ status: itemStatus });
+        expect(close?.resultText).toBeUndefined();
+        expect(close?.aggregatedOutput).toBeUndefined();
+      },
+    );
   });
 });
