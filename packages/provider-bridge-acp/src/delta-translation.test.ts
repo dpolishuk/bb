@@ -3019,6 +3019,16 @@ describe("acp dialect tool call event normalization", () => {
         acpStatus: "completed",
         itemStatus: "completed",
       },
+      {
+        name: "provider error",
+        event: {
+          jsonrpc: "2.0",
+          method: "error",
+          params: { threadId: THREAD_ID, message: "Agent request failed" },
+        },
+        acpStatus: "failed",
+        itemStatus: null,
+      },
     ])(
       "settles the normalizer on $name",
       ({ event, acpStatus, itemStatus }) => {
@@ -3076,13 +3086,24 @@ describe("acp dialect tool call event normalization", () => {
           context,
         );
         const deltas = translator.translateAcpEvent(event, context);
-        const close = deltas.find((delta) => delta.kind === "item.close");
 
         expect(statuses).toEqual(["in_progress", acpStatus]);
         expect(activeCalls.size).toBe(0);
-        expect(close).toMatchObject({ status: itemStatus });
-        expect(close?.resultText).toBeUndefined();
-        expect(close?.aggregatedOutput).toBeUndefined();
+        if (itemStatus === null) {
+          expect(deltas).toEqual([
+            {
+              kind: "provider.error",
+              message: "Provider error",
+              detail: "Agent request failed",
+              settlesTurn: true,
+            },
+          ]);
+        } else {
+          const close = deltas.find((delta) => delta.kind === "item.close");
+          expect(close).toMatchObject({ status: itemStatus });
+          expect(close?.resultText).toBeUndefined();
+          expect(close?.aggregatedOutput).toBeUndefined();
+        }
       },
     );
   });

@@ -943,6 +943,7 @@ export function createAcpDeltaTranslator(
   ): ThreadDelta[] {
     const errorEnvelope = errorEnvelopeSchema.safeParse(event);
     if (errorEnvelope.success) {
+      drainOpenToolCalls(context, "failed");
       clearThreadCalls(context);
       return [
         {
